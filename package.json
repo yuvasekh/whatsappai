@@ -1,0 +1,19 @@
+{
+  "name": "whatsapp-playwright-server",
+  "version": "1.0.0",
+  "description": "Express + Playwright WhatsApp automation on Vercel",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.9.0",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "multer": "^2.0.0",
+    "path": "^0.12.7",
+    "playwright": "^1.52.0"
+  }
+}
