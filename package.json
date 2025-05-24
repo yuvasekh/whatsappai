@@ -4,9 +4,10 @@
   "description": "Express + Playwright WhatsApp automation on Vercel",
   "main": "index.js",
   "type": "commonjs",
-  "scripts": {
-    "start": "node index.js",
- "postinstall": "npx playwright install chromium --with-deps"
+ "scripts": {
+  "postinstall": "npx playwright install chromium",
+  "start": "node index.js"
+
 
   },
   "dependencies": {
