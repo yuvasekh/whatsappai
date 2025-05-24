@@ -90,6 +90,7 @@ async function sendSingleMessage(mobile, message, caption = '', link = '') {
       '[title="Search or start new chat"]',
       'div[role="textbox"][data-tab="3"]'
     ];
+    //
     
     // Find and click search box
     let searchBox = null;
