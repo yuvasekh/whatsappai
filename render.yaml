@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: your-service-name
+    env: node
+    buildCommand: |
+      npm install
+      npx playwright install --with-deps
+    startCommand: npm start
