@@ -2,7 +2,10 @@ services:
   - type: web
     name: your-service-name
     env: node
+    plan: free
     buildCommand: |
       npm install
       npx playwright install --with-deps
     startCommand: npm start
+    branch: main  # or your deployment branch
+    autoDeploy: true
