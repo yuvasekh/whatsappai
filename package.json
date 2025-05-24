@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node index.js",
-    "postinstall": "npx playwright install --ignore-scripts"
+ "postinstall": "npx playwright install"
+
   },
   "dependencies": {
     "axios": "^1.9.0",
