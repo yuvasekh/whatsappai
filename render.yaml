@@ -1,11 +1,9 @@
 services:
   - type: web
-    name: your-service-name
-    env: node
-    plan: free
-    buildCommand: |
-      npm install
-      npx playwright install --with-deps
-    startCommand: npm start
-    branch: master  # or your deployment branch
-    autoDeploy: true
+    name: express-app
+    runtime: node
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
