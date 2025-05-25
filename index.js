@@ -1,3 +1,5 @@
+process.env.PLAYWRIGHT_BROWSERS_PATH = '/ms-playwright';
+console.log(console.log('PLAYWRIGHT_BROWSERS_PATH:', process.env.PLAYWRIGHT_BROWSERS_PATH))
 const path = require('path');
 const express = require('express');
 const { chromium } = require('playwright');
@@ -14,7 +16,6 @@ app.use(cors());
 let globalBrowser = null;
 let globalPage = null;
 let isLoggedIn = false;
-console.log(console.log('PLAYWRIGHT_BROWSERS_PATH:', process.env.PLAYWRIGHT_BROWSERS_PATH))
 // Initialize WhatsApp Web session
 async function initializeWhatsApp() {
   try {
