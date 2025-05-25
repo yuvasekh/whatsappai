@@ -5,8 +5,7 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "postinstall": "npx playwright install chromium || true",
-    "start": "npx playwright install chromium && node index.js"
+    "start": "node index.js"
   },
   "dependencies": {
     "axios": "^1.9.0",
