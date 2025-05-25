@@ -21,10 +21,14 @@ async function initializeWhatsApp() {
   try {
     console.log('🚀 Initializing WhatsApp Web session...');
     
-    globalBrowser = await chromium.launch({ 
-      headless: false,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
+   const isHeadless = process.env.HEADLESS !== 'false';
+
+globalBrowser = await chromium.launch({
+  headless: isHeadless,
+  args: ['--no-sandbox', '--disable-setuid-sandbox']
+});
+
+    
     
     const context = await globalBrowser.newContext({
       viewport: { width: 1280, height: 720 }
