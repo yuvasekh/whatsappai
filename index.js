@@ -20,23 +20,61 @@ let isLoggedIn = false;
 async function initializeWhatsApp() {
   try {
     console.log('🚀 Initializing WhatsApp Web session...');
-    
-    globalBrowser = await chromium.launch({ 
-      headless: false,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+
+    // Force headless mode for cloud deployments
+    const isCloudEnvironment = process.env.NODE_ENV === 'production' ||
+                               process.env.RENDER ||
+                               process.env.RAILWAY ||
+                               process.env.VERCEL ||
+                               process.env.HEROKU ||
+                               !process.env.DISPLAY;
+
+    console.log(`🔧 Environment: ${isCloudEnvironment ? 'Cloud/Headless' : 'Local/Headed'}`);
+    console.log(`🔧 Forcing headless mode for cloud deployment`);
+
+    globalBrowser = await chromium.launch({
+      headless: true, // Always use headless for cloud deployments
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process'
+      ]
     });
-    
+
     const context = await globalBrowser.newContext({
       viewport: { width: 1280, height: 720 }
     });
-    
+
     globalPage = await context.newPage();
-    
+
     console.log('🌐 Navigating to WhatsApp Web...');
     await globalPage.goto('https://web.whatsapp.com/', { waitUntil: 'networkidle' });
-    
-    console.log('📱 Please scan the QR code with your WhatsApp mobile app...');
-    
+
+    // In headless mode, try to extract QR code
+    if (isCloudEnvironment) {
+      console.log('🔍 Headless mode: Attempting to extract QR code...');
+      try {
+        // Wait for QR code to appear
+        await globalPage.waitForSelector('[data-testid="qr-code"]', { timeout: 10000 });
+
+        // Get QR code as base64
+        const qrElement = await globalPage.$('[data-testid="qr-code"]');
+        if (qrElement) {
+          const qrCode = await qrElement.screenshot({ encoding: 'base64' });
+          console.log('📱 QR Code extracted! You can implement QR display in your frontend.');
+          // You could save this to a file or send it via API
+        }
+      } catch (error) {
+        console.log('⚠️ Could not extract QR code, continuing with login detection...');
+      }
+    } else {
+      console.log('📱 Please scan the QR code with your WhatsApp mobile app...');
+    }
+
     // Wait for login completion
     const searchSelectors = [
       '[data-testid="chat-list-search"]',
@@ -44,7 +82,7 @@ async function initializeWhatsApp() {
       '[title="Search or start new chat"]',
       'div[role="textbox"][data-tab="3"]'
     ];
-    
+
     let searchBox = null;
     for (const selector of searchSelectors) {
       try {
@@ -58,11 +96,11 @@ async function initializeWhatsApp() {
         continue;
       }
     }
-    
+
     if (!searchBox) {
       throw new Error('Login failed - could not find search box');
     }
-    
+
     return true;
   } catch (error) {
     console.error('❌ Failed to initialize WhatsApp:', error.message);
@@ -83,7 +121,7 @@ async function sendSingleMessage(mobile, message, caption = '', link = '') {
     }
 
     console.log(`📞 Sending message to: ${mobile}`);
-    
+
     // Search selectors
     const searchSelectors = [
       '[data-testid="chat-list-search"]',
@@ -92,7 +130,7 @@ async function sendSingleMessage(mobile, message, caption = '', link = '') {
       'div[role="textbox"][data-tab="3"]'
     ];
     //
-    
+
     // Find and click search box
     let searchBox = null;
     for (const selector of searchSelectors) {
@@ -103,24 +141,24 @@ async function sendSingleMessage(mobile, message, caption = '', link = '') {
         continue;
       }
     }
-    
+
     if (!searchBox) {
       throw new Error('Search box not found');
     }
-    
+
     // Clear search and enter phone number
     await searchBox.click();
     await searchBox.fill('');
     await globalPage.waitForTimeout(500);
-    
+
     // Format phone number (ensure it starts with +)
     const formattedMobile = mobile.startsWith('+') ? mobile : `+${mobile}`;
     await searchBox.fill(formattedMobile);
     await globalPage.press('div[contenteditable="true"][data-tab="3"]', 'Enter');
-    
+
     // Wait for chat to load
     await globalPage.waitForTimeout(3000);
-    
+
     // Find message input box
     const messageSelectors = [
       '[data-testid="conversation-compose-box-input"]',
@@ -128,7 +166,7 @@ async function sendSingleMessage(mobile, message, caption = '', link = '') {
       '[role="textbox"][data-tab="10"]',
       'div[contenteditable="true"][data-lexical-editor="true"]'
     ];
-    
+
     let messageBox = null;
     for (const selector of messageSelectors) {
       try {
@@ -138,11 +176,11 @@ async function sendSingleMessage(mobile, message, caption = '', link = '') {
         continue;
       }
     }
-    
+
     if (!messageBox) {
       throw new Error('Message input box not found');
     }
-    
+
     // Prepare complete message
     let completeMessage = message;
     if (caption) {
@@ -151,17 +189,17 @@ async function sendSingleMessage(mobile, message, caption = '', link = '') {
     if (link) {
       completeMessage += `\n\n${link}`;
     }
-    
+
     // Send message
     await messageBox.click();
     await messageBox.fill(completeMessage);
     await messageBox.press('Enter');
-    
+
     console.log(`✅ Message sent to ${mobile}`);
     await globalPage.waitForTimeout(2000); // Wait between messages
-    
+
     return { success: true, mobile, message: 'Message sent successfully' };
-    
+
   } catch (error) {
     console.error(`❌ Failed to send message to ${mobile}:`, error.message);
     return { success: false, mobile, error: error.message };
@@ -172,8 +210,8 @@ async function sendSingleMessage(mobile, message, caption = '', link = '') {
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+  res.json({
+    status: 'OK',
     whatsappStatus: isLoggedIn ? 'Connected' : 'Disconnected',
     timestamp: new Date().toISOString()
   });
@@ -183,22 +221,22 @@ app.get('/health', (req, res) => {
 app.post('/initialize', async (req, res) => {
   try {
     if (isLoggedIn && globalBrowser) {
-      return res.json({ 
-        success: true, 
-        message: 'WhatsApp session already active' 
+      return res.json({
+        success: true,
+        message: 'WhatsApp session already active'
       });
     }
-    
+
     await initializeWhatsApp();
-    
-    res.json({ 
-      success: true, 
-      message: 'WhatsApp session initialized successfully. Please scan QR code if prompted.' 
+
+    res.json({
+      success: true,
+      message: 'WhatsApp session initialized successfully. Please scan QR code if prompted.'
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
@@ -226,7 +264,7 @@ console.log(req.query)
 app.post('/send-messages', async (req, res) => {
   try {
     const { whatsapp } = req.body;
-    
+
     // Validate request body
     if (!whatsapp || !Array.isArray(whatsapp) || whatsapp.length === 0) {
       return res.status(400).json({
@@ -234,7 +272,7 @@ app.post('/send-messages', async (req, res) => {
         error: 'Invalid request body. Expected array of WhatsApp messages.'
       });
     }
-    
+
     // Check if WhatsApp is initialized
     if (!isLoggedIn || !globalPage) {
       return res.status(400).json({
@@ -242,15 +280,15 @@ app.post('/send-messages', async (req, res) => {
         error: 'WhatsApp session not initialized. Please call /initialize first.'
       });
     }
-    
+
     console.log(`📤 Processing ${whatsapp.length} messages...`);
-    
+
     const results = [];
-    
+
     // Process each message
     for (const item of whatsapp) {
       const { id, mobile, message, caption = '', link = '' } = item;
-      
+
       if (!mobile || !message) {
         results.push({
           id,
@@ -260,26 +298,26 @@ app.post('/send-messages', async (req, res) => {
         });
         continue;
       }
-      
+
       const result = await sendSingleMessage(mobile, message, caption, link);
       results.push({
         id,
         ...result
       });
-      
+
       // Add delay between messages to avoid being blocked
       if (whatsapp.indexOf(item) < whatsapp.length - 1) {
         console.log('⏳ Waiting 3 seconds before next message...');
         await new Promise(resolve => setTimeout(resolve, 3000));
       }
     }
-    
+
     // Count successful and failed messages
     const successful = results.filter(r => r.success).length;
     const failed = results.filter(r => !r.success).length;
-    
+
     console.log(`🎉 Bulk messaging completed: ${successful} successful, ${failed} failed`);
-    
+
     res.json({
       success: true,
       summary: {
@@ -289,7 +327,7 @@ app.post('/send-messages', async (req, res) => {
       },
       results
     });
-    
+
   } catch (error) {
     console.error('❌ Bulk messaging error:', error.message);
     res.status(500).json({
@@ -309,15 +347,15 @@ app.post('/close', async (req, res) => {
       isLoggedIn = false;
       console.log('🔒 WhatsApp session closed');
     }
-    
-    res.json({ 
-      success: true, 
-      message: 'WhatsApp session closed successfully' 
+
+    res.json({
+      success: true,
+      message: 'WhatsApp session closed successfully'
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
