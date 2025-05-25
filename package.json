@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "postinstall": "npx playwright instal",
+    "postinstall": "npx playwright install",
     "start": "node index.js"
   },
   "dependencies": {
