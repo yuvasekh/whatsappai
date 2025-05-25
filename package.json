@@ -1,11 +1,10 @@
 {
   "name": "whatsapp-playwright-server",
   "version": "1.0.0",
-  "description": "Express + Playwright WhatsApp automation on Vercel",
+  "description": "Express + Playwright WhatsApp automation on Render",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "postinstall": "npx playwright install --with-deps",
     "start": "node index.js"
   },
   "dependencies": {
