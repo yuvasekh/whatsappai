@@ -10,6 +10,9 @@ COPY package*.json ./
 # Install npm dependencies
 RUN npm install
 
+# Install Playwright browsers explicitly
+RUN npx playwright install chromium
+
 # Copy the rest of the application files
 COPY . .
 
@@ -21,6 +24,7 @@ EXPOSE 10000
 
 # Set environment variables for Playwright
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms/playwright
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
 
 # Start the application
 CMD ["npm", "start"]
