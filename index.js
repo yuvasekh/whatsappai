@@ -65,7 +65,7 @@ async function initializeWhatsApp() {
           console.log('✅ Playwright browsers are already installed');
         } catch (error) {
           console.log('⚠️ Installing Playwright browsers...');
-          execSync('npx playwright install --with-deps chromium', {
+          execSync('npx playwright install chromium', {
             stdio: 'inherit',
             timeout: 300000 // 5 minutes timeout
           });
