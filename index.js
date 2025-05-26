@@ -158,7 +158,7 @@ async function initializeWhatsApp() {
       Object.defineProperty(navigator, 'webdriver', {
         get: () => undefined,
       });
-      
+
       // Override plugins length
       Object.defineProperty(navigator, 'plugins', {
         get: () => [1, 2, 3, 4, 5],
@@ -166,13 +166,15 @@ async function initializeWhatsApp() {
     });
 
     console.log('🌐 Navigating to WhatsApp Web...');
-    await globalPage.goto('https://web.whatsapp.com/', { 
+    await globalPage.goto('https://web.whatsapp.com/', {
       waitUntil: 'networkidle',
       timeout: 30000
     });
 
-    // Wait for page to stabilize
-    await globalPage.waitForTimeout(5000);
+    // Wait for page to stabilize (longer for cloud environments)
+    const stabilizeTime = isCloudEnvironment ? 10000 : 5000;
+    console.log(`⏳ Waiting ${stabilizeTime}ms for page to stabilize...`);
+    await globalPage.waitForTimeout(stabilizeTime);
 
     // Check for browser compatibility issues first
     const compatibilityCheck = await globalPage.evaluate(() => {
@@ -183,12 +185,12 @@ async function initializeWhatsApp() {
         'browser compatibility',
         'supported browser'
       ];
-      
+
       const bodyText = document.body.innerText || '';
-      const hasCompatibilityIssue = compatibilityMessages.some(msg => 
+      const hasCompatibilityIssue = compatibilityMessages.some(msg =>
         bodyText.toLowerCase().includes(msg.toLowerCase())
       );
-      
+
       return {
         hasCompatibilityIssue,
         bodyText: bodyText.substring(0, 500),
@@ -199,7 +201,7 @@ async function initializeWhatsApp() {
     if (compatibilityCheck.hasCompatibilityIssue) {
       console.log('⚠️ Browser compatibility issue detected');
       console.log('📄 Page content:', compatibilityCheck.bodyText);
-      
+
       // Try to click through compatibility warning
       const continueSelectors = [
         'button[data-testid="continue-button"]',
@@ -228,7 +230,7 @@ async function initializeWhatsApp() {
       if (clickedContinue) {
         // Wait for page to reload/navigate after clicking continue
         await globalPage.waitForTimeout(5000);
-        
+
         // Check if we're still on the same page or redirected
         const newUrl = await globalPage.url();
         console.log(`🔄 New URL after continue: ${newUrl}`);
@@ -265,36 +267,38 @@ async function initializeWhatsApp() {
     // Enhanced QR code detection with better selectors
     console.log('🔍 Looking for QR code...');
 
-    // Wait a bit more for QR to potentially load
-    await globalPage.waitForTimeout(3000);
+    // Wait a bit more for QR to potentially load (longer for cloud)
+    const qrWaitTime = isCloudEnvironment ? 8000 : 3000;
+    console.log(`⏳ Waiting ${qrWaitTime}ms for QR code to load...`);
+    await globalPage.waitForTimeout(qrWaitTime);
 
     // Updated QR selectors based on current WhatsApp Web structure
     const qrSelectors = [
       // Primary canvas selectors (most reliable)
       'canvas[aria-label*="QR"]',
-      'canvas[aria-label*="Scan"]', 
+      'canvas[aria-label*="Scan"]',
       'canvas[aria-label*="code"]',
-      
+
       // QR container selectors
       '[data-testid="qr-code"] canvas',
       '[data-testid="qr-canvas"]',
       '[data-ref="qr"] canvas',
-      
+
       // Generic canvas fallbacks
       'canvas[role="img"]',
       'canvas[width][height]', // Canvas with dimensions
-      
+
       // Image fallbacks
       'img[alt*="QR"]',
       'img[alt*="Scan"]',
       'img[src*="qr"]',
-      
+
       // Container-based approach
       '.qr-container canvas',
       '.landing-wrapper canvas',
       '.landing-main canvas',
       '[data-testid*="qr"] canvas',
-      
+
       // Last resort - any canvas
       'canvas'
     ];
@@ -305,22 +309,23 @@ async function initializeWhatsApp() {
     for (const selector of qrSelectors) {
       try {
         console.log(`🔍 Trying QR selector: ${selector}`);
-        
-        // Wait for element to be present and visible
-        await globalPage.waitForSelector(selector, { 
-          timeout: 5000,
-          state: 'attached' 
+
+        // Wait for element to be present and visible (longer timeout for cloud)
+        const selectorTimeout = isCloudEnvironment ? 15000 : 5000;
+        await globalPage.waitForSelector(selector, {
+          timeout: selectorTimeout,
+          state: 'attached'
         });
-        
+
         const elements = await globalPage.$$(selector);
-        
+
         for (const element of elements) {
           const isVisible = await element.isVisible();
           if (!isVisible) continue;
-          
+
           const boundingBox = await element.boundingBox();
           if (!boundingBox || boundingBox.width < 50 || boundingBox.height < 50) continue;
-          
+
           // Additional validation for canvas elements
           const tagName = await element.evaluate(node => node.tagName.toLowerCase());
           if (tagName === 'canvas') {
@@ -328,29 +333,29 @@ async function initializeWhatsApp() {
               try {
                 const ctx = canvas.getContext('2d');
                 if (!ctx) return false;
-                
+
                 const imageData = ctx.getImageData(0, 0, Math.min(canvas.width, 100), Math.min(canvas.height, 100));
                 return imageData.data.some((pixel, index) => index % 4 !== 3 && pixel !== 0);
               } catch (e) {
                 return false;
               }
             });
-            
+
             if (!hasContent) {
               console.log(`⚠️ Canvas found but appears empty: ${selector}`);
               continue;
             }
           }
-          
+
           qrElement = element;
           usedSelector = selector;
           console.log(`✅ Found valid QR element: ${selector}`);
           console.log(`📐 Dimensions: ${boundingBox.width}x${boundingBox.height}`);
           break;
         }
-        
+
         if (qrElement) break;
-        
+
       } catch (e) {
         console.log(`❌ Selector ${selector} failed: ${e.message}`);
         continue;
@@ -360,14 +365,14 @@ async function initializeWhatsApp() {
     if (!qrElement) {
       // Enhanced debugging
       console.log('❌ QR code not found. Running comprehensive debug...');
-      
+
       try {
         // Take full page screenshot
         await globalPage.screenshot({
           path: 'debug-whatsapp-full.png',
           fullPage: true
         });
-        
+
         // Get detailed page info
         const debugInfo = await globalPage.evaluate(() => {
           const canvases = Array.from(document.querySelectorAll('canvas')).map((canvas, index) => ({
@@ -386,7 +391,7 @@ async function initializeWhatsApp() {
             parentElement: canvas.parentElement?.tagName,
             parentClass: canvas.parentElement?.className
           }));
-          
+
           const allImages = Array.from(document.querySelectorAll('img')).map((img, index) => ({
             index,
             src: img.src?.substring(0, 100),
@@ -397,24 +402,24 @@ async function initializeWhatsApp() {
             height: img.height,
             visible: img.offsetParent !== null
           }));
-          
-          return { 
-            canvases, 
+
+          return {
+            canvases,
             images: allImages,
             url: window.location.href,
             title: document.title,
             bodyText: document.body.innerText?.substring(0, 1000)
           };
         });
-        
+
         console.log('🔍 Debug info:', JSON.stringify(debugInfo, null, 2));
-        
+
       } catch (screenshotError) {
         console.log('❌ Could not complete debug:', screenshotError.message);
       }
 
-      return { 
-        loggedIn: false, 
+      return {
+        loggedIn: false,
         error: 'QR code not found',
         debug: 'Check debug-whatsapp-full.png for visual debugging'
       };
@@ -429,22 +434,22 @@ async function initializeWhatsApp() {
       if (tagName === 'canvas') {
         // Wait a moment for canvas to be fully rendered
         await globalPage.waitForTimeout(1000);
-        
+
         qrDataUrl = await qrElement.evaluate(canvas => {
           try {
             // Ensure canvas is ready
             const ctx = canvas.getContext('2d');
             if (!ctx) return null;
-            
+
             // Check if canvas has content by sampling pixels
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const hasContent = imageData.data.some((pixel, index) => index % 4 !== 3 && pixel !== 0);
-            
+
             if (!hasContent) {
               console.warn('Canvas appears to be empty or not ready');
               return null;
             }
-            
+
             return canvas.toDataURL('image/png');
           } catch (e) {
             console.error('Canvas toDataURL failed:', e);
@@ -458,7 +463,7 @@ async function initializeWhatsApp() {
       // Fallback to screenshot if canvas extraction failed
       if (!qrDataUrl || qrDataUrl === 'data:,' || qrDataUrl.length < 1000) {
         console.log('⚠️ Canvas extraction failed, using screenshot fallback...');
-        
+
         const screenshot = await qrElement.screenshot({ type: 'png' });
         const base64Screenshot = screenshot.toString('base64');
         qrDataUrl = `data:image/png;base64,${base64Screenshot}`;
@@ -472,9 +477,9 @@ async function initializeWhatsApp() {
 
       console.log('✅ QR code captured successfully');
       console.log(`📊 QR data length: ${qrDataUrl.length} characters`);
-      
-      return { 
-        loggedIn: false, 
+
+      return {
+        loggedIn: false,
         qrCode: qrDataUrl,
         metadata: {
           selector: usedSelector,
@@ -486,16 +491,16 @@ async function initializeWhatsApp() {
 
     } catch (extractError) {
       console.error('❌ QR extraction failed:', extractError.message);
-      
+
       // Final fallback: screenshot the element
       try {
         const screenshot = await qrElement.screenshot({ type: 'png' });
         const base64Screenshot = screenshot.toString('base64');
         const dataUrl = `data:image/png;base64,${base64Screenshot}`;
-        
+
         console.log('✅ Final fallback: captured QR as screenshot');
-        return { 
-          loggedIn: false, 
+        return {
+          loggedIn: false,
           qrCode: dataUrl,
           metadata: {
             selector: usedSelector + ' (final-fallback)',
