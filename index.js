@@ -78,19 +78,32 @@ async function initializeWhatsApp() {
     }
 
     // Try to launch browser with fallback options
-    const launchOptions = {
-      headless: isCloudEnvironment, // Visible locally, headless in cloud
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--no-first-run',
+    const baseArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-first-run',
+      '--disable-features=VizDisplayCompositor'
+    ];
+
+    // Add cloud-specific args
+    if (isCloudEnvironment) {
+      baseArgs.push(
         '--no-zygote',
         '--single-process',
-        '--disable-features=VizDisplayCompositor'
-      ]
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding'
+      );
+    }
+
+    const launchOptions = {
+      headless: isCloudEnvironment,
+      args: baseArgs
     };
+
+    console.log('🚀 Attempting to launch browser with options:', JSON.stringify(launchOptions, null, 2));
 
     try {
       globalBrowser = await chromium.launch(launchOptions);
@@ -98,16 +111,33 @@ async function initializeWhatsApp() {
     } catch (launchError) {
       console.error('❌ Failed to launch Chromium:', launchError.message);
 
-      // Try with different executable path if available
       if (isCloudEnvironment) {
-        console.log('🔄 Trying alternative browser launch...');
+        console.log('🔄 Trying alternative approaches...');
+
+        // Try 1: Force reinstall specific version
         try {
-          // Force reinstall and try again
-          execSync('npx playwright install chromium --force', { stdio: 'inherit' });
+          const { execSync } = require('child_process');
+          console.log('📦 Force reinstalling Playwright browsers...');
+          execSync('npx playwright install chromium --force', { stdio: 'inherit', timeout: 180000 });
+
           globalBrowser = await chromium.launch(launchOptions);
-          console.log('✅ Browser launched after reinstall');
-        } catch (retryError) {
-          throw new Error(`Browser launch failed: ${launchError.message}. Retry failed: ${retryError.message}`);
+          console.log('✅ Browser launched after force reinstall');
+        } catch (reinstallError) {
+          console.error('❌ Force reinstall failed:', reinstallError.message);
+
+          // Try 2: Use different launch options
+          try {
+            console.log('🔄 Trying with minimal launch options...');
+            const minimalOptions = {
+              headless: true,
+              args: ['--no-sandbox', '--disable-setuid-sandbox']
+            };
+
+            globalBrowser = await chromium.launch(minimalOptions);
+            console.log('✅ Browser launched with minimal options');
+          } catch (minimalError) {
+            throw new Error(`All browser launch attempts failed. Original: ${launchError.message}. Reinstall: ${reinstallError.message}. Minimal: ${minimalError.message}`);
+          }
         }
       } else {
         throw launchError;

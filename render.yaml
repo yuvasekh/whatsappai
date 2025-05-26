@@ -5,8 +5,11 @@ services:
     plan: starter
     buildCommand: |
       npm ci
-      npx playwright install
-      echo "Playwright installation completed"
+      echo "Installing Playwright browsers..."
+      npx playwright install chromium
+      echo "Verifying browser installation..."
+      ls -la /opt/render/.cache/ms-playwright/ || echo "Browser cache not found"
+      echo "Build completed"
     startCommand: node index.js
     envVars:
       - key: NODE_ENV
@@ -15,7 +18,9 @@ services:
         value: "true"
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: /opt/render/.cache/ms-playwright
+      - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+        value: "false"
     disk:
       name: playwright-cache
       mountPath: /opt/render/.cache
-      sizeGB: 2
+      sizeGB: 3
