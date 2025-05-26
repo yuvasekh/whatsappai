@@ -43,50 +43,66 @@ let isLoggedIn = false;
 async function initializeWhatsApp() {
   try {
     console.log('🚀 Initializing WhatsApp Web session...');
-    
-    globalBrowser = await chromium.launch({ 
+
+    globalBrowser = await chromium.launch({
       headless: false,
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
-    
+
     const context = await globalBrowser.newContext({
       viewport: { width: 1280, height: 720 }
     });
-    
+
     globalPage = await context.newPage();
-    
+
     console.log('🌐 Navigating to WhatsApp Web...');
     await globalPage.goto('https://web.whatsapp.com/', { waitUntil: 'networkidle' });
-    
-    console.log('📱 Please scan the QR code with your WhatsApp mobile app...');
-    
-    // Wait for login completion
+
+    const loginTimeout = 3000;
     const searchSelectors = [
       '[data-testid="chat-list-search"]',
       'div[contenteditable="true"][data-tab="3"]',
       '[title="Search or start new chat"]',
       'div[role="textbox"][data-tab="3"]'
     ];
-    
-    let searchBox = null;
+
     for (const selector of searchSelectors) {
       try {
-        searchBox = await globalPage.waitForSelector(selector, { timeout: 120000 });
-        if (searchBox) {
+        const el = await globalPage.waitForSelector(selector, { timeout: loginTimeout });
+        if (el) {
           console.log(`✅ Login successful! Found search box with selector: ${selector}`);
           isLoggedIn = true;
-          break;
+          return { loggedIn: true };
         }
-      } catch (e) {
-        continue;
+      } catch {
+        // continue to next selector
       }
     }
-    
-    if (!searchBox) {
-      throw new Error('Login failed - could not find search box');
+
+    // Look for QR code
+    console.log('🔍 Looking for QR code...');
+    const qrSelector = 'canvas[aria-label*="Scan this QR code to link a device"]';
+
+    try {
+      const qrElement = await globalPage.waitForSelector(qrSelector, { timeout: 30000 });
+      await globalPage.waitForTimeout(1000); // allow QR to fully render
+
+      if (!qrElement) throw new Error('QR code canvas not found');
+
+      const qrDataUrl = await qrElement.evaluate(canvas => canvas.toDataURL());
+
+      if (!qrDataUrl || !qrDataUrl.startsWith('data:image')) {
+        throw new Error('Invalid or empty QR code data');
+      }
+      console.log(qrDataUrl,"yuva")
+
+      console.log('📸 QR code captured.');
+      return { loggedIn: false, qrCode: qrDataUrl };
+
+    } catch (err) {
+      throw new Error('QR code not found or failed to extract: ' + err.message);
     }
-    
-    return true;
+
   } catch (error) {
     console.error('❌ Failed to initialize WhatsApp:', error.message);
     if (globalBrowser) {
@@ -97,6 +113,10 @@ async function initializeWhatsApp() {
     throw error;
   }
 }
+
+
+
+
 
 // Navigate to chat
 async function navigateToChat(mobile) {
@@ -401,11 +421,11 @@ app.post('/initialize', async (req, res) => {
       });
     }
     
-    await initializeWhatsApp();
+   var result= await initializeWhatsApp();
     
     res.json({ 
       success: true, 
-      message: 'WhatsApp session initialized successfully. Please scan QR code if prompted.' 
+      qr: result.qrCode
     });
   } catch (error) {
     res.status(500).json({ 
@@ -486,7 +506,7 @@ app.post('/send-media', upload.single('file'), async (req, res) => {
       });
     }
     
-    if (!isLoggedIn || !globalPage) {
+    if (!isLoggedIn) {
       return res.status(400).json({
         success: false,
         error: 'WhatsApp session not initialized. Please call /initialize first.'
@@ -521,7 +541,7 @@ app.post('/send-media', upload.single('file'), async (req, res) => {
 app.post('/send-messages', async (req, res) => {
   try {
     const { whatsapp } = req.body;
-    
+    isLoggedIn=true
     if (!whatsapp || !Array.isArray(whatsapp) || whatsapp.length === 0) {
       return res.status(400).json({
         success: false,
@@ -664,16 +684,6 @@ process.on('SIGTERM', async () => {
   }
   process.exit(0);
 });
-console.log(path.join(__dirname, 'build'));
-
-// Serve static files from the React app
-app.use(express.static(path.join(__dirname, 'build')));
-
-// Handle all routing for React app
-app.get('', (req, res) => {
-  res.sendFile(path.join(__dirname, 'build', 'index.html'));
-});
-
 
 // Start server
 app.listen(PORT, () => {
