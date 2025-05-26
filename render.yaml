@@ -5,7 +5,7 @@ services:
     plan: starter
     buildCommand: |
       npm ci
-      npx playwright install chromium
+      npx playwright install
       echo "Playwright installation completed"
     startCommand: node index.js
     envVars:

@@ -61,11 +61,11 @@ async function initializeWhatsApp() {
 
         // Try to install browsers if not available
         try {
-          execSync('npx playwright install --dry-run chromium', { stdio: 'pipe' });
+          execSync('npx playwright install --dry-run', { stdio: 'pipe' });
           console.log('✅ Playwright browsers are already installed');
         } catch (error) {
           console.log('⚠️ Installing Playwright browsers...');
-          execSync('npx playwright install chromium', {
+          execSync('npx playwright install', {
             stdio: 'inherit',
             timeout: 300000 // 5 minutes timeout
           });
@@ -77,7 +77,8 @@ async function initializeWhatsApp() {
       }
     }
 
-    globalBrowser = await chromium.launch({
+    // Try to launch browser with fallback options
+    const launchOptions = {
       headless: isCloudEnvironment, // Visible locally, headless in cloud
       args: [
         '--no-sandbox',
@@ -86,9 +87,32 @@ async function initializeWhatsApp() {
         '--disable-gpu',
         '--no-first-run',
         '--no-zygote',
-        '--single-process'
+        '--single-process',
+        '--disable-features=VizDisplayCompositor'
       ]
-    });
+    };
+
+    try {
+      globalBrowser = await chromium.launch(launchOptions);
+      console.log('✅ Chromium browser launched successfully');
+    } catch (launchError) {
+      console.error('❌ Failed to launch Chromium:', launchError.message);
+
+      // Try with different executable path if available
+      if (isCloudEnvironment) {
+        console.log('🔄 Trying alternative browser launch...');
+        try {
+          // Force reinstall and try again
+          execSync('npx playwright install chromium --force', { stdio: 'inherit' });
+          globalBrowser = await chromium.launch(launchOptions);
+          console.log('✅ Browser launched after reinstall');
+        } catch (retryError) {
+          throw new Error(`Browser launch failed: ${launchError.message}. Retry failed: ${retryError.message}`);
+        }
+      } else {
+        throw launchError;
+      }
+    }
 
     const context = await globalBrowser.newContext({
       viewport: { width: 1280, height: 720 }
