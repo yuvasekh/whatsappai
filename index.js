@@ -892,7 +892,10 @@ app.post('/initialize', async (req, res) => {
     });
   }
 });
-
+app.get('/screenshot', (req, res) => {
+  const screenshotPath = path.join(__dirname, 'debug-whatsapp-full.png');
+  res.sendFile(screenshotPath);
+});
 // Get QR Code endpoint
 app.get('/qr-code', async (req, res) => {
   try {
