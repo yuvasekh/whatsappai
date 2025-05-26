@@ -156,7 +156,7 @@ async function initializeWhatsApp() {
     // Wait to detect either login or QR code
 
     // Try wait for login success first (search box)
-    const loginTimeout = 30000;
+    const loginTimeout = 10000;
     const searchSelectors = [
       '[data-testid="chat-list-search"]',
       'div[contenteditable="true"][data-tab="3"]',
@@ -177,34 +177,87 @@ async function initializeWhatsApp() {
       }
     }
 
-    // If login not detected, look for QR code img
+    // If login not detected, look for QR code with multiple selectors
     console.log('🔍 Looking for QR code...');
-    const qrSelector = 'canvas[aria-label="Scan me!"], img[alt="Scan me!"]'; // WhatsApp uses canvas or img
+
+    // Updated QR code selectors for current WhatsApp Web
+    const qrSelectors = [
+      '[data-testid="qr-code"]',
+      'canvas[aria-label*="QR"]',
+      'canvas[aria-label*="Scan"]',
+      'img[alt*="QR"]',
+      'img[alt*="Scan"]',
+      'canvas[role="img"]',
+      'div[data-testid="qr-code"] canvas',
+      'div[data-testid="qr-code"] img',
+      '.qr-code canvas',
+      '.qr-code img'
+    ];
+
+    let qrElement = null;
+    let usedSelector = '';
+
+    // Try each selector
+    for (const selector of qrSelectors) {
+      try {
+        console.log(`🔍 Trying QR selector: ${selector}`);
+        qrElement = await globalPage.waitForSelector(selector, { timeout: 5000 });
+        if (qrElement) {
+          usedSelector = selector;
+          console.log(`✅ Found QR code with selector: ${selector}`);
+          break;
+        }
+      } catch (e) {
+        console.log(`❌ Selector ${selector} failed: ${e.message}`);
+        continue;
+      }
+    }
+
+    if (!qrElement) {
+      // Take a screenshot for debugging
+      try {
+        const screenshot = await globalPage.screenshot({ encoding: 'base64' });
+        console.log('📸 Page screenshot taken for debugging');
+        // You could save this screenshot or return it for debugging
+      } catch (screenshotError) {
+        console.log('❌ Could not take screenshot:', screenshotError.message);
+      }
+
+      throw new Error('QR code not found with any selector. Page may not have loaded properly or QR code may have expired.');
+    }
 
     try {
-      const qrElement = await globalPage.waitForSelector(qrSelector, { timeout: 10000 });
-      if (!qrElement) throw new Error('QR code element not found');
-
-      // WhatsApp may render QR as <canvas> or <img>
-
       let qrDataUrl = null;
+      const tagName = await qrElement.evaluate(node => node.tagName);
+      console.log(`📋 QR element tag: ${tagName}`);
 
-      // If canvas: convert to data URL by evaluating in page context
-      if ((await qrElement.evaluate(node => node.tagName)) === 'CANVAS') {
+      if (tagName === 'CANVAS') {
         qrDataUrl = await qrElement.evaluate(canvas => canvas.toDataURL());
-      } else {
-        // Else if img, get src attribute
+      } else if (tagName === 'IMG') {
         qrDataUrl = await qrElement.getAttribute('src');
+      } else {
+        // Try to find canvas or img inside the element
+        const innerCanvas = await qrElement.$('canvas');
+        const innerImg = await qrElement.$('img');
+
+        if (innerCanvas) {
+          qrDataUrl = await innerCanvas.evaluate(canvas => canvas.toDataURL());
+        } else if (innerImg) {
+          qrDataUrl = await innerImg.getAttribute('src');
+        }
       }
-      console.log('qrDataUrl', qrDataUrl);
 
-      if (!qrDataUrl) throw new Error('Could not get QR code image data');
+      if (!qrDataUrl || qrDataUrl === 'data:,') {
+        throw new Error('QR code data is empty or invalid');
+      }
 
-      console.log('📸 QR code captured.');
+      console.log('✅ QR code captured successfully');
+      console.log(`📊 QR data length: ${qrDataUrl.length} characters`);
+
       return { loggedIn: false, qrCode: qrDataUrl };
 
-    } catch (err) {
-      throw new Error('QR code not found: ' + err.message);
+    } catch (extractError) {
+      throw new Error('Failed to extract QR code data: ' + extractError.message);
     }
 
   } catch (error) {
@@ -556,19 +609,50 @@ app.get('/qr-code', async (req, res) => {
       });
     }
 
-    // Try to get fresh QR code
+    // Try to get fresh QR code using multiple selectors
     try {
-      const qrSelector = 'canvas[aria-label*="Scan this QR code to link a device"]';
-      const qrElement = await globalPage.$(qrSelector);
+      const qrSelectors = [
+        '[data-testid="qr-code"]',
+        'canvas[aria-label*="QR"]',
+        'canvas[aria-label*="Scan"]',
+        'img[alt*="QR"]',
+        'img[alt*="Scan"]',
+        'canvas[role="img"]',
+        'div[data-testid="qr-code"] canvas',
+        'div[data-testid="qr-code"] img'
+      ];
+
+      let qrElement = null;
+      let usedSelector = '';
+
+      // Try each selector
+      for (const selector of qrSelectors) {
+        try {
+          qrElement = await globalPage.$(selector);
+          if (qrElement) {
+            usedSelector = selector;
+            break;
+          }
+        } catch (e) {
+          continue;
+        }
+      }
 
       if (qrElement) {
-        const qrDataUrl = await qrElement.evaluate(canvas => canvas.toDataURL());
+        let qrDataUrl = null;
+        const tagName = await qrElement.evaluate(node => node.tagName);
 
-        if (qrDataUrl && qrDataUrl.startsWith('data:image')) {
+        if (tagName === 'CANVAS') {
+          qrDataUrl = await qrElement.evaluate(canvas => canvas.toDataURL());
+        } else if (tagName === 'IMG') {
+          qrDataUrl = await qrElement.getAttribute('src');
+        }
+
+        if (qrDataUrl && (qrDataUrl.startsWith('data:image') || qrDataUrl.startsWith('http'))) {
           return res.json({
             success: true,
             qrCode: qrDataUrl,
-            message: 'QR code extracted successfully'
+            message: `QR code extracted successfully using selector: ${usedSelector}`
           });
         }
       }
