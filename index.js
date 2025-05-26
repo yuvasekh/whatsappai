@@ -612,6 +612,7 @@ app.get('/qr-code', async (req, res) => {
     // Try to get fresh QR code using multiple selectors
     try {
       const qrSelectors = [
+        'canvas[aria-label*="Scan this QR code to link a device"]',
         '[data-testid="qr-code"]',
         'canvas[aria-label*="QR"]',
         'canvas[aria-label*="Scan"]',
