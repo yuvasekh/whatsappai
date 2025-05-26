@@ -44,9 +44,50 @@ async function initializeWhatsApp() {
   try {
     console.log('🚀 Initializing WhatsApp Web session...');
 
+    // Detect cloud environment vs local development
+    const isCloudEnvironment = process.env.NODE_ENV === 'production' ||
+                               process.env.RENDER ||
+                               process.env.RAILWAY ||
+                               process.env.VERCEL ||
+                               process.env.HEROKU;
+
+    console.log(`🔧 Environment: ${isCloudEnvironment ? 'Cloud (headless)' : 'Local (visible browser)'}`);
+
+    // Ensure browsers are installed in cloud environment
+    if (isCloudEnvironment) {
+      try {
+        console.log('🔍 Checking Playwright browser installation...');
+        const { execSync } = require('child_process');
+
+        // Try to install browsers if not available
+        try {
+          execSync('npx playwright install --dry-run chromium', { stdio: 'pipe' });
+          console.log('✅ Playwright browsers are already installed');
+        } catch (error) {
+          console.log('⚠️ Installing Playwright browsers...');
+          execSync('npx playwright install --with-deps chromium', {
+            stdio: 'inherit',
+            timeout: 300000 // 5 minutes timeout
+          });
+          console.log('✅ Playwright browsers installed successfully');
+        }
+      } catch (installError) {
+        console.error('❌ Failed to install Playwright browsers:', installError.message);
+        throw new Error('Browser installation failed: ' + installError.message);
+      }
+    }
+
     globalBrowser = await chromium.launch({
-      headless: false,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      headless: isCloudEnvironment, // Visible locally, headless in cloud
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process'
+      ]
     });
 
     const context = await globalBrowser.newContext({
@@ -428,11 +469,13 @@ app.post('/initialize', async (req, res) => {
       });
     }
 
-    await initializeWhatsApp();
+    const result = await initializeWhatsApp();
 
     res.json({
       success: true,
-      message: 'WhatsApp session initialized successfully. Please scan QR code if prompted.'
+      message: 'WhatsApp session initialized successfully. Please scan QR code if prompted.',
+      qr: result.qrCode || null,
+      loggedIn: result.loggedIn || false
     });
   } catch (error) {
     res.status(500).json({

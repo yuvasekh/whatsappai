@@ -3,14 +3,19 @@ services:
     name: whatsapp-api
     env: node
     plan: starter
-    buildCommand: npm install && npx playwright install --with-deps chromium
+    buildCommand: |
+      npm ci
+      npx playwright install --with-deps chromium
+      echo "Playwright installation completed"
     startCommand: node index.js
     envVars:
       - key: NODE_ENV
         value: production
+      - key: RENDER
+        value: "true"
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: /opt/render/.cache/ms-playwright
     disk:
       name: playwright-cache
       mountPath: /opt/render/.cache
-      sizeGB: 1
+      sizeGB: 2

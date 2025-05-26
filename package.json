@@ -5,8 +5,9 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "postinstall": "npx playwright install --with-deps chromium || true",
-    "start": "npx playwright install --with-deps chromium && node index.js",
+    "postinstall": "npx playwright install --with-deps chromium",
+    "build": "npx playwright install --with-deps chromium",
+    "start": "node index.js",
     "dev": "node index.js"
   },
   "dependencies": {
