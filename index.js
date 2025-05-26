@@ -856,7 +856,8 @@ app.post('/initialize', async (req, res) => {
     });
   }
 });
-app.get('/screenshot', (req, res) => {
+// Static screenshot file endpoint (for debug files)
+app.get('/debug-screenshot', (req, res) => {
   const screenshotPath = path.join(__dirname, 'debug-whatsapp-full.png');
   res.sendFile(screenshotPath);
 });
@@ -926,9 +927,51 @@ app.get('/qr-code', async (req, res) => {
         }
       }
 
+      // If QR code not found, try refreshing the page
+      console.log('⚠️ QR code not found, attempting page refresh...');
+      try {
+        await globalPage.reload({ waitUntil: 'networkidle' });
+        await globalPage.waitForTimeout(3000);
+
+        // Try again after refresh
+        for (const selector of qrSelectors) {
+          try {
+            qrElement = await globalPage.$(selector);
+            if (qrElement) {
+              usedSelector = selector;
+              break;
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+
+        if (qrElement) {
+          let qrDataUrl = null;
+          const tagName = await qrElement.evaluate(node => node.tagName);
+
+          if (tagName === 'CANVAS') {
+            qrDataUrl = await qrElement.evaluate(canvas => canvas.toDataURL());
+          } else if (tagName === 'IMG') {
+            qrDataUrl = await qrElement.getAttribute('src');
+          }
+
+          if (qrDataUrl && (qrDataUrl.startsWith('data:image') || qrDataUrl.startsWith('http'))) {
+            return res.json({
+              success: true,
+              qrCode: qrDataUrl,
+              message: `QR code extracted after page refresh using selector: ${usedSelector}`
+            });
+          }
+        }
+      } catch (refreshError) {
+        console.log('❌ Page refresh failed:', refreshError.message);
+      }
+
       return res.status(404).json({
         success: false,
-        message: 'QR code not found. It may have expired or you may already be logged in.'
+        message: 'QR code not found even after page refresh. It may have expired or you may already be logged in.',
+        suggestion: 'Try calling /initialize again to restart the session'
       });
 
     } catch (error) {
@@ -946,13 +989,68 @@ app.get('/qr-code', async (req, res) => {
   }
 });
 
-// Get page screenshot for debugging
-app.get('/screenshot', async (req, res) => {
+// Force refresh WhatsApp Web page
+app.post('/refresh', async (req, res) => {
   try {
     if (!globalPage) {
       return res.status(400).json({
         success: false,
         message: 'WhatsApp session not initialized. Please call /initialize first.'
+      });
+    }
+
+    console.log('🔄 Force refreshing WhatsApp Web page...');
+
+    // Reload the page
+    await globalPage.reload({ waitUntil: 'networkidle' });
+    await globalPage.waitForTimeout(5000);
+
+    // Check if we're still on WhatsApp Web
+    const currentUrl = await globalPage.url();
+    if (!currentUrl.includes('web.whatsapp.com')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Page navigation failed. Current URL: ' + currentUrl
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'WhatsApp Web page refreshed successfully',
+      url: currentUrl,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Page refresh failed:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get page screenshot for debugging
+app.get('/screenshot', async (req, res) => {
+  try {
+    // Check if browser and page are still valid
+    if (!globalBrowser || !globalPage) {
+      return res.status(400).json({
+        success: false,
+        message: 'WhatsApp session not initialized. Please call /initialize first.',
+        browserActive: !!globalBrowser,
+        pageActive: !!globalPage
+      });
+    }
+
+    // Check if page is still connected
+    try {
+      await globalPage.evaluate(() => window.location.href);
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Browser page is disconnected. Please reinitialize the session.',
+        error: error.message
       });
     }
 
