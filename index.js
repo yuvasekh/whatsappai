@@ -24,7 +24,7 @@ async function initializeWhatsApp() {
    const isHeadless = process.env.HEADLESS !== 'false';
 
 globalBrowser = await chromium.launch({
-  headless: isHeadless,
+  headless: true,
   args: ['--no-sandbox', '--disable-setuid-sandbox']
 });
 
