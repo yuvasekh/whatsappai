@@ -216,7 +216,10 @@ async function initializeWhatsApp() {
     if (!qrElement) {
       // Take a screenshot for debugging
       try {
-        const screenshot = await globalPage.screenshot({ encoding: 'base64' });
+        // const screenshot = await globalPage.screenshot({ encoding: 'base64' });
+        const screenshotPath = `public/debug-${Date.now()}.png`;
+await globalPage.screenshot({ path: screenshotPath, fullPage: true });
+
         console.log('📸 Page screenshot taken for debugging');
         // You could save this screenshot or return it for debugging
       } catch (screenshotError) {
@@ -778,6 +781,28 @@ app.post('/send-media', upload.single('file'), async (req, res) => {
       error: error.message
     });
   }
+});
+app.get('/api/screenshots', (req, res) => {
+  const dirPath = path.join(__dirname, 'public');
+
+  fs.readdir(dirPath, (err, files) => {
+    if (err) {
+      return res.status(500).json({ error: 'Unable to read screenshot directory.' });
+    }
+
+    const imageFiles = files.filter(file =>
+      file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')
+    );
+
+    const baseUrl = `${req.protocol}://${req.get('host')}/public`;
+
+    const screenshots = imageFiles.map(file => ({
+      filename: file,
+      url: `${baseUrl}/${file}`
+    }));
+
+    res.json({ count: screenshots.length, screenshots });
+  });
 });
 
 // Send bulk messages (enhanced to support media)
