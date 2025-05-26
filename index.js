@@ -380,7 +380,12 @@ await globalPage.screenshot({ path: screenshotPath, fullPage: true });
       return {
         loggedIn: false,
         error: 'QR code not found',
-        debug: 'Check debug-whatsapp-full.png for visual debugging'
+        debug: 'Check debug-whatsapp-full.png for visual debugging',
+        screenshotAvailable: true,
+        debugEndpoints: {
+          screenshot: '/screenshot',
+          pageAnalysis: '/debug-page'
+        }
       };
     }
 
@@ -934,6 +939,168 @@ app.get('/qr-code', async (req, res) => {
     }
 
   } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get page screenshot for debugging
+app.get('/screenshot', async (req, res) => {
+  try {
+    if (!globalPage) {
+      return res.status(400).json({
+        success: false,
+        message: 'WhatsApp session not initialized. Please call /initialize first.'
+      });
+    }
+
+    console.log('📸 Taking page screenshot for debugging...');
+
+    // Take full page screenshot
+    const screenshot = await globalPage.screenshot({
+      type: 'png',
+      fullPage: true,
+      encoding: 'base64'
+    });
+
+    // Get page info for context
+    const pageInfo = await globalPage.evaluate(() => {
+      return {
+        url: window.location.href,
+        title: document.title,
+        bodyText: document.body.innerText?.substring(0, 500),
+        canvasCount: document.querySelectorAll('canvas').length,
+        imgCount: document.querySelectorAll('img').length,
+        viewport: {
+          width: window.innerWidth,
+          height: window.innerHeight
+        }
+      };
+    });
+
+    res.json({
+      success: true,
+      screenshot: `data:image/png;base64,${screenshot}`,
+      pageInfo: pageInfo,
+      message: 'Screenshot captured successfully',
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Screenshot failed:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get detailed page analysis for debugging
+app.get('/debug-page', async (req, res) => {
+  try {
+    if (!globalPage) {
+      return res.status(400).json({
+        success: false,
+        message: 'WhatsApp session not initialized. Please call /initialize first.'
+      });
+    }
+
+    console.log('🔍 Running detailed page analysis...');
+
+    // Get comprehensive page analysis
+    const analysis = await globalPage.evaluate(() => {
+      // Get all canvas elements with detailed info
+      const canvases = Array.from(document.querySelectorAll('canvas')).map((canvas, index) => ({
+        index,
+        ariaLabel: canvas.getAttribute('aria-label'),
+        className: canvas.className,
+        id: canvas.id,
+        role: canvas.getAttribute('role'),
+        width: canvas.width,
+        height: canvas.height,
+        offsetWidth: canvas.offsetWidth,
+        offsetHeight: canvas.offsetHeight,
+        visible: canvas.offsetParent !== null,
+        display: window.getComputedStyle(canvas).display,
+        opacity: window.getComputedStyle(canvas).opacity,
+        parentElement: canvas.parentElement?.tagName,
+        parentClass: canvas.parentElement?.className,
+        boundingRect: canvas.getBoundingClientRect()
+      }));
+
+      // Get all images
+      const images = Array.from(document.querySelectorAll('img')).map((img, index) => ({
+        index,
+        src: img.src?.substring(0, 100),
+        alt: img.alt,
+        className: img.className,
+        id: img.id,
+        width: img.width,
+        height: img.height,
+        visible: img.offsetParent !== null,
+        boundingRect: img.getBoundingClientRect()
+      }));
+
+      // Get elements with data-testid
+      const testIdElements = Array.from(document.querySelectorAll('[data-testid]')).map(el => ({
+        testId: el.getAttribute('data-testid'),
+        tagName: el.tagName,
+        className: el.className,
+        textContent: el.textContent?.substring(0, 100),
+        visible: el.offsetParent !== null
+      }));
+
+      // Look for QR-related text
+      const qrRelatedText = Array.from(document.querySelectorAll('*'))
+        .filter(el => el.textContent && (
+          el.textContent.toLowerCase().includes('qr') ||
+          el.textContent.toLowerCase().includes('scan') ||
+          el.textContent.toLowerCase().includes('code') ||
+          el.textContent.toLowerCase().includes('whatsapp')
+        ))
+        .map(el => ({
+          tagName: el.tagName,
+          textContent: el.textContent?.substring(0, 200),
+          className: el.className,
+          id: el.id
+        }))
+        .slice(0, 20); // Limit results
+
+      return {
+        url: window.location.href,
+        title: document.title,
+        bodyText: document.body.innerText?.substring(0, 1000),
+        canvases,
+        images,
+        testIdElements,
+        qrRelatedText,
+        viewport: {
+          width: window.innerWidth,
+          height: window.innerHeight
+        },
+        userAgent: navigator.userAgent,
+        timestamp: new Date().toISOString()
+      };
+    });
+
+    // Take a screenshot too
+    const screenshot = await globalPage.screenshot({
+      type: 'png',
+      fullPage: true,
+      encoding: 'base64'
+    });
+
+    res.json({
+      success: true,
+      analysis,
+      screenshot: `data:image/png;base64,${screenshot}`,
+      message: 'Page analysis completed successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Page analysis failed:', error.message);
     res.status(500).json({
       success: false,
       error: error.message
