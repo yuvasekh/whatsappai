@@ -665,10 +665,11 @@ async function handleDialogs() {
 // Send text message
 async function sendTextMessage(mobile, message) {
   try {
+      await handleDialogs();
     await navigateToChat(mobile);
 
     // Handle any dialogs before sending message
-    await handleDialogs();
+  
 
     // Find message input box
     const messageSelectors = [
