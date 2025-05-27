@@ -493,10 +493,68 @@ await globalPage.screenshot({ path: screenshotPath, fullPage: true });
 
 
 
+// Wait for WhatsApp to be fully loaded after QR scan
+async function waitForWhatsAppReady() {
+  try {
+    console.log('⏳ Waiting for WhatsApp to be fully loaded...');
+
+    // Wait for main interface elements to be available
+    const readySelectors = [
+      '[data-testid="chat-list"]',
+      '[data-testid="side"]',
+      'div[id="side"]',
+      'div[data-testid="chat-list-search"]',
+      'div[role="textbox"][data-tab="3"]'
+    ];
+
+    let isReady = false;
+    const maxWaitTime = 30000; // 30 seconds
+    const startTime = Date.now();
+
+    while (!isReady && (Date.now() - startTime) < maxWaitTime) {
+      for (const selector of readySelectors) {
+        try {
+          const element = await globalPage.$(selector);
+          if (element && await element.isVisible()) {
+            console.log(`✅ WhatsApp ready - found: ${selector}`);
+            isReady = true;
+            break;
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+
+      if (!isReady) {
+        console.log('⏳ Still waiting for WhatsApp interface...');
+        await globalPage.waitForTimeout(2000);
+
+        // Handle any dialogs that might appear during loading
+        await handleDialogs();
+      }
+    }
+
+    if (!isReady) {
+      throw new Error('WhatsApp interface not ready after 30 seconds');
+    }
+
+    // Additional wait for interface to stabilize
+    await globalPage.waitForTimeout(3000);
+    console.log('✅ WhatsApp is fully loaded and ready');
+
+  } catch (error) {
+    console.error('❌ Error waiting for WhatsApp to be ready:', error.message);
+    throw error;
+  }
+}
+
 // Navigate to chat
 async function navigateToChat(mobile) {
   try {
     console.log(`📞 Navigating to chat: ${mobile}`);
+
+    // Ensure WhatsApp is fully loaded first
+    await waitForWhatsAppReady();
 
     // First, check for and handle any dialog boxes
     await handleDialogs();
@@ -665,11 +723,11 @@ async function handleDialogs() {
 // Send text message
 async function sendTextMessage(mobile, message) {
   try {
-      await handleDialogs();
     await navigateToChat(mobile);
 
     // Handle any dialogs before sending message
-  
+    await handleDialogs();
+
 
     // Find message input box
     const messageSelectors = [
@@ -712,7 +770,7 @@ async function sendTextMessage(mobile, message) {
 // Send media file (image, video, document, audio)
 async function sendMediaFile(mobile, filePath, caption = '', mediaType = 'auto') {
   try {
-    
+    await navigateToChat(mobile);
 
     // Handle any dialogs before sending media
     await handleDialogs();
@@ -724,7 +782,6 @@ async function sendMediaFile(mobile, filePath, caption = '', mediaType = 'auto')
       'span[data-testid="clip"]',
       'div[title="Attach"]'
     ];
-await navigateToChat(mobile);
     let attachmentButton = null;
     for (const selector of attachmentSelectors) {
       try {
