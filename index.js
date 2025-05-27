@@ -711,7 +711,7 @@ async function sendTextMessage(mobile, message) {
 // Send media file (image, video, document, audio)
 async function sendMediaFile(mobile, filePath, caption = '', mediaType = 'auto') {
   try {
-    await navigateToChat(mobile);
+    
 
     // Handle any dialogs before sending media
     await handleDialogs();
@@ -723,7 +723,7 @@ async function sendMediaFile(mobile, filePath, caption = '', mediaType = 'auto')
       'span[data-testid="clip"]',
       'div[title="Attach"]'
     ];
-
+await navigateToChat(mobile);
     let attachmentButton = null;
     for (const selector of attachmentSelectors) {
       try {
