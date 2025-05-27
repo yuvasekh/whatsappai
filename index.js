@@ -171,8 +171,8 @@ async function initializeWhatsApp() {
       timeout: 30000
     });
 
-    // Wait for page to stabilize (longer for cloud environments)
-    const stabilizeTime = isCloudEnvironment ? 10000 : 5000;
+    // Optimized wait time for page to stabilize
+    const stabilizeTime = isCloudEnvironment ? 5000 : 2000;
     console.log(`⏳ Waiting ${stabilizeTime}ms for page to stabilize...`);
     await globalPage.waitForTimeout(stabilizeTime);
 
@@ -267,99 +267,85 @@ async function initializeWhatsApp() {
     // Enhanced QR code detection with better selectors
     console.log('🔍 Looking for QR code...');
 
-    // Wait a bit more for QR to potentially load (longer for cloud)
-    const qrWaitTime = isCloudEnvironment ? 8000 : 3000;
+    // Optimized QR wait time
+    const qrWaitTime = isCloudEnvironment ? 3000 : 1000;
     console.log(`⏳ Waiting ${qrWaitTime}ms for QR code to load...`);
     await globalPage.waitForTimeout(qrWaitTime);
 
-    // Updated QR selectors based on current WhatsApp Web structure
+    // Optimized QR selectors - most likely first for speed
     const qrSelectors = [
-      // Primary canvas selectors (most reliable)
+      // Most common working selectors first
       'canvas[aria-label*="QR"]',
-      'canvas[aria-label*="Scan"]',
-      'canvas[aria-label*="code"]',
-
-      // QR container selectors
       '[data-testid="qr-code"] canvas',
-      '[data-testid="qr-canvas"]',
-      '[data-ref="qr"] canvas',
-
-      // Generic canvas fallbacks
+      'canvas[aria-label*="Scan"]',
       'canvas[role="img"]',
-      'canvas[width][height]', // Canvas with dimensions
-
-      // Image fallbacks
-      'img[alt*="QR"]',
-      'img[alt*="Scan"]',
-      'img[src*="qr"]',
-
-      // Container-based approach
-      '.qr-container canvas',
-      '.landing-wrapper canvas',
-      '.landing-main canvas',
-      '[data-testid*="qr"] canvas',
-
-      // Last resort - any canvas
-      'canvas'
+      'canvas' // Simple fallback
     ];
 
     let qrElement = null;
     let usedSelector = '';
 
-    for (const selector of qrSelectors) {
-      try {
-        console.log(`🔍 Trying QR selector: ${selector}`);
+    // Fast QR detection - try all selectors simultaneously
+    console.log('🔍 Fast QR detection starting...');
 
-        // Wait for element to be present and visible (longer timeout for cloud)
-        const selectorTimeout = isCloudEnvironment ? 15000 : 5000;
-        await globalPage.waitForSelector(selector, {
-          timeout: selectorTimeout,
-          state: 'attached'
-        });
+    try {
+      // Try to find any QR element quickly
+      const qrPromises = qrSelectors.map(async (selector, index) => {
+        try {
+          const timeout = isCloudEnvironment ? 8000 : 3000;
+          await globalPage.waitForSelector(selector, { timeout, state: 'attached' });
 
-        const elements = await globalPage.$$(selector);
+          const elements = await globalPage.$$(selector);
+          for (const element of elements) {
+            const isVisible = await element.isVisible();
+            if (!isVisible) continue;
 
-        for (const element of elements) {
-          const isVisible = await element.isVisible();
-          if (!isVisible) continue;
+            const boundingBox = await element.boundingBox();
+            if (!boundingBox || boundingBox.width < 50 || boundingBox.height < 50) continue;
 
-          const boundingBox = await element.boundingBox();
-          if (!boundingBox || boundingBox.width < 50 || boundingBox.height < 50) continue;
+            // Quick validation for canvas
+            const tagName = await element.evaluate(node => node.tagName.toLowerCase());
+            if (tagName === 'canvas') {
+              // Simplified content check
+              const hasContent = await element.evaluate(canvas => {
+                try {
+                  const ctx = canvas.getContext('2d');
+                  if (!ctx || canvas.width < 50 || canvas.height < 50) return false;
 
-          // Additional validation for canvas elements
-          const tagName = await element.evaluate(node => node.tagName.toLowerCase());
-          if (tagName === 'canvas') {
-            const hasContent = await element.evaluate(canvas => {
-              try {
-                const ctx = canvas.getContext('2d');
-                if (!ctx) return false;
+                  // Quick pixel check - just sample a few pixels
+                  const imageData = ctx.getImageData(10, 10, 20, 20);
+                  return imageData.data.some(pixel => pixel > 0);
+                } catch (e) {
+                  return true; // Assume it has content if we can't check
+                }
+              });
 
-                const imageData = ctx.getImageData(0, 0, Math.min(canvas.width, 100), Math.min(canvas.height, 100));
-                return imageData.data.some((pixel, index) => index % 4 !== 3 && pixel !== 0);
-              } catch (e) {
-                return false;
-              }
-            });
-
-            if (!hasContent) {
-              console.log(`⚠️ Canvas found but appears empty: ${selector}`);
-              continue;
+              if (!hasContent) continue;
             }
+
+            return { element, selector, index };
           }
-
-          qrElement = element;
-          usedSelector = selector;
-          console.log(`✅ Found valid QR element: ${selector}`);
-          console.log(`📐 Dimensions: ${boundingBox.width}x${boundingBox.height}`);
-          break;
+          return null;
+        } catch (e) {
+          return null;
         }
+      });
 
-        if (qrElement) break;
+      // Wait for the first successful result
+      const results = await Promise.allSettled(qrPromises);
+      const successfulResult = results
+        .filter(result => result.status === 'fulfilled' && result.value)
+        .map(result => result.value)
+        .sort((a, b) => a.index - b.index)[0]; // Prefer earlier selectors
 
-      } catch (e) {
-        console.log(`❌ Selector ${selector} failed: ${e.message}`);
-        continue;
+      if (successfulResult) {
+        qrElement = successfulResult.element;
+        usedSelector = successfulResult.selector;
+        console.log(`✅ Found QR element: ${usedSelector}`);
       }
+
+    } catch (e) {
+      console.log('❌ Fast QR detection failed:', e.message);
     }
 
     if (!qrElement) {
@@ -396,27 +382,15 @@ await globalPage.screenshot({ path: screenshotPath, fullPage: true });
       console.log(`📋 QR element tag: ${tagName}, selector: ${usedSelector}`);
 
       if (tagName === 'canvas') {
-        // Wait a moment for canvas to be fully rendered
-        await globalPage.waitForTimeout(1000);
-
+        // Optimized canvas extraction - no extra wait
         qrDataUrl = await qrElement.evaluate(canvas => {
           try {
-            // Ensure canvas is ready
             const ctx = canvas.getContext('2d');
-            if (!ctx) return null;
+            if (!ctx || canvas.width < 50 || canvas.height < 50) return null;
 
-            // Check if canvas has content by sampling pixels
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const hasContent = imageData.data.some((pixel, index) => index % 4 !== 3 && pixel !== 0);
-
-            if (!hasContent) {
-              console.warn('Canvas appears to be empty or not ready');
-              return null;
-            }
-
+            // Quick extraction without extensive validation
             return canvas.toDataURL('image/png');
           } catch (e) {
-            console.error('Canvas toDataURL failed:', e);
             return null;
           }
         });
