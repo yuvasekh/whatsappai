@@ -251,18 +251,18 @@ async function initializeWhatsApp() {
     ];
 
     console.log('🔍 Checking for login status...');
-    for (const selector of searchSelectors) {
-      try {
-        const el = await globalPage.waitForSelector(selector, { timeout: loginTimeout });
-        if (el && await el.isVisible()) {
-          console.log(`✅ Login successful! Found search box with selector: ${selector}`);
-          isLoggedIn = true;
-          return { loggedIn: true };
-        }
-      } catch (e) {
-        // ignore, try next selector
-      }
-    }
+    // for (const selector of searchSelectors) {
+    //   try {
+    //     const el = await globalPage.waitForSelector(selector, { timeout: loginTimeout });
+    //     if (el && await el.isVisible()) {
+    //       console.log(`✅ Login successful! Found search box with selector: ${selector}`);
+    //       isLoggedIn = true;
+    //       return { loggedIn: true };
+    //     }
+    //   } catch (e) {
+    //     // ignore, try next selector
+    //   }
+    // }
 
     // Enhanced QR code detection with better selectors
     console.log('🔍 Looking for QR code...');
