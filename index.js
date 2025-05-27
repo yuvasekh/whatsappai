@@ -501,43 +501,95 @@ async function navigateToChat(mobile) {
     // First, check for and handle any dialog boxes
     await handleDialogs();
 
-    // Search selectors
+    // Enhanced search selectors for cloud environments
     const searchSelectors = [
       '[data-testid="chat-list-search"]',
       'div[contenteditable="true"][data-tab="3"]',
       '[title="Search or start new chat"]',
-      'div[role="textbox"][data-tab="3"]'
+      'div[role="textbox"][data-tab="3"]',
+      '[placeholder*="Search"]',
+      '[placeholder*="search"]',
+      'input[type="text"][placeholder*="Search"]',
+      'div[contenteditable="true"][title*="Search"]',
+      'div[contenteditable="true"][aria-label*="Search"]',
+      'div[data-testid="search-input"]',
+      'div[data-testid="chat-search"]'
     ];
 
-    // Find and click search box
+    // Wait longer for search box to appear in cloud environments
+    const isCloudEnvironment = process.env.NODE_ENV === 'production' || process.env.RENDER;
+    const searchTimeout = isCloudEnvironment ? 15000 : 10000;
+
+    console.log(`🔍 Looking for search box (timeout: ${searchTimeout}ms)...`);
+
+    // Find and click search box with enhanced detection
     let searchBox = null;
+    let usedSelector = '';
+
     for (const selector of searchSelectors) {
       try {
-        searchBox = await globalPage.$(selector);
-        if (searchBox) break;
+        console.log(`🔍 Trying search selector: ${selector}`);
+        searchBox = await globalPage.waitForSelector(selector, {
+          timeout: 3000,
+          state: 'visible'
+        });
+
+        if (searchBox && await searchBox.isVisible()) {
+          usedSelector = selector;
+          console.log(`✅ Found search box: ${selector}`);
+          break;
+        }
       } catch (e) {
+        console.log(`❌ Search selector failed: ${selector}`);
         continue;
       }
     }
 
     if (!searchBox) {
-      throw new Error('Search box not found');
+      // Take a screenshot for debugging
+      try {
+        await globalPage.screenshot({ path: 'debug-search-not-found.png', fullPage: true });
+        console.log('📸 Debug screenshot saved: debug-search-not-found.png');
+      } catch (e) {
+        console.log('❌ Could not take debug screenshot');
+      }
+
+      throw new Error('Search box not found after trying all selectors');
     }
 
     // Clear search and enter phone number
     await searchBox.click();
+    await globalPage.waitForTimeout(1000);
+
+    // Clear any existing content
+    await searchBox.selectText();
     await searchBox.fill('');
     await globalPage.waitForTimeout(500);
 
     // Format phone number (ensure it starts with +)
     const formattedMobile = mobile.startsWith('+') ? mobile : `+${mobile}`;
+    console.log(`📱 Searching for: ${formattedMobile}`);
+
     await searchBox.fill(formattedMobile);
-    await globalPage.press('div[contenteditable="true"][data-tab="3"]', 'Enter');
+    await globalPage.waitForTimeout(1000);
+
+    // Try multiple ways to press Enter
+    try {
+      await searchBox.press('Enter');
+    } catch (e) {
+      try {
+        await globalPage.keyboard.press('Enter');
+      } catch (e2) {
+        console.log('⚠️ Could not press Enter, continuing...');
+      }
+    }
 
     // Wait for chat to load
     await globalPage.waitForTimeout(3000);
 
+    console.log(`✅ Successfully navigated to chat: ${mobile}`);
     return true;
+
   } catch (error) {
     console.error(`❌ Failed to navigate to chat ${mobile}:`, error.message);
     throw error;
