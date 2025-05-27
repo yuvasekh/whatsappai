@@ -515,15 +515,35 @@ async function navigateToChat(mobile) {
   }
 }
 
-// Helper function to handle various WhatsApp dialogs
+// Enhanced helper function to handle various WhatsApp dialogs
 async function handleDialogs() {
   try {
-    // Check for "Continue" button in fresh look dialog
-    const continueButton = await globalPage.$('button:has-text("Continue")');
-    if (continueButton) {
-      console.log('📋 Found "Continue" dialog, clicking...');
-      await continueButton.click();
-      await globalPage.waitForTimeout(1000);
+    console.log('🔍 Checking for WhatsApp dialogs...');
+
+    // Enhanced Continue button selectors (your specific logic)
+    const continueSelectors = [
+      'button[data-testid="continue-button"]',
+      'button:has-text("Continue")',
+      'button:has-text("CONTINUE")',
+      '[data-testid="btn-continue"]',
+      '.continue-btn',
+      'button[type="button"]:has-text("Continue")'
+    ];
+
+    let clickedContinue = false;
+    for (const selector of continueSelectors) {
+      try {
+        const continueBtn = await globalPage.waitForSelector(selector, { timeout: 2000 });
+        if (continueBtn && await continueBtn.isVisible()) {
+          await continueBtn.click();
+          console.log(`✅ Clicked continue button: ${selector}`);
+          clickedContinue = true;
+          await globalPage.waitForTimeout(2000); // Wait for dialog to close
+          break;
+        }
+      } catch (e) {
+        // Try next selector
+      }
     }
 
     // Check for other common dialogs
@@ -533,8 +553,9 @@ async function handleDialogs() {
       '[role="button"]:has-text("OK")',               // Generic OK
       '[role="button"]:has-text("Got it")',           // Got it button
       '[role="button"]:has-text("Dismiss")',          // Dismiss button
-      'button:has-text("Continue")',                  // Continue button
       'div[data-testid="modal"] button',              // Any button in modal
+      '[data-testid="modal-close-button"]',           // Modal close
+      'button[aria-label="Close"]',                   // Close button
     ];
 
     for (const selector of dialogSelectors) {
@@ -543,7 +564,7 @@ async function handleDialogs() {
         if (button && await button.isVisible()) {
           console.log(`📋 Found dialog button: ${selector}, clicking...`);
           await button.click();
-          await globalPage.waitForTimeout(500);
+          await globalPage.waitForTimeout(1000);
           break;
         }
       } catch (e) {
@@ -553,7 +574,7 @@ async function handleDialogs() {
     }
 
     // Additional wait to let any animations complete
-    await globalPage.waitForTimeout(1000);
+    await globalPage.waitForTimeout(500);
 
   } catch (error) {
     console.log('⚠️ No dialogs to handle or error handling dialogs:', error.message);
@@ -564,6 +585,9 @@ async function handleDialogs() {
 async function sendTextMessage(mobile, message) {
   try {
     await navigateToChat(mobile);
+
+    // Handle any dialogs before sending message
+    await handleDialogs();
 
     // Find message input box
     const messageSelectors = [
@@ -607,6 +631,9 @@ async function sendTextMessage(mobile, message) {
 async function sendMediaFile(mobile, filePath, caption = '', mediaType = 'auto') {
   try {
     await navigateToChat(mobile);
+
+    // Handle any dialogs before sending media
+    await handleDialogs();
 
     // Find and click attachment button
     const attachmentSelectors = [
