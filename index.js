@@ -552,12 +552,12 @@ async function waitForWhatsAppReady() {
 async function navigateToChat(mobile) {
   try {
     console.log(`📞 Navigating to chat: ${mobile}`);
-
+    await handleDialogs();
     // Ensure WhatsApp is fully loaded first
     await waitForWhatsAppReady();
 
     // First, check for and handle any dialog boxes
-    await handleDialogs();
+
 
     // Enhanced search selectors for cloud environments
     const searchSelectors = [
@@ -766,156 +766,6 @@ async function sendTextMessage(mobile, message) {
     return { success: false, mobile, error: error.message };
   }
 }
-
-// Send media file (image, video, document, audio)
-async function sendMediaFile(mobile, filePath, caption = '', mediaType = 'auto') {
-  try {
-    await navigateToChat(mobile);
-
-    // Handle any dialogs before sending media
-    await handleDialogs();
-
-    // Find and click attachment button
-    const attachmentSelectors = [
-      '[data-testid="clip"]',
-      '[data-testid="attach-menu-btn"]',
-      'span[data-testid="clip"]',
-      'div[title="Attach"]'
-    ];
-    let attachmentButton = null;
-    for (const selector of attachmentSelectors) {
-      try {
-        attachmentButton = await globalPage.waitForSelector(selector, { timeout: 10000 });
-        if (attachmentButton) {
-          console.log(`Found attachment button with selector: ${selector}`);
-          break;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-
-    if (!attachmentButton) {
-      throw new Error('Attachment button not found');
-    }
-
-    await attachmentButton.click();
-    await globalPage.waitForTimeout(1000);
-
-    // Determine media type based on file extension if not specified
-    const fileExtension = path.extname(filePath).toLowerCase();
-    let buttonSelector = '';
-
-    if (mediaType === 'auto') {
-      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
-      const videoExtensions = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.webm'];
-      const audioExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.aac'];
-
-      if (imageExtensions.includes(fileExtension) || videoExtensions.includes(fileExtension)) {
-        mediaType = 'media';
-      } else if (audioExtensions.includes(fileExtension)) {
-        mediaType = 'audio';
-      } else {
-        mediaType = 'document';
-      }
-    }
-
-    // Select appropriate attachment type
-    switch (mediaType) {
-      case 'media':
-      case 'image':
-      case 'video':
-        buttonSelector = '[data-testid="attach-image"], input[accept*="image"], input[accept*="video"]';
-        break;
-      case 'document':
-        buttonSelector = '[data-testid="attach-document"], input[accept*="*"]';
-        break;
-      case 'audio':
-        buttonSelector = '[data-testid="attach-audio"], input[accept*="audio"]';
-        break;
-      default:
-        buttonSelector = '[data-testid="attach-document"], input[accept*="*"]';
-    }
-
-    // Wait for file input and upload file
-    try {
-      const fileInput = await globalPage.waitForSelector('input[type="file"]', { timeout: 5000 });
-      await fileInput.setInputFiles(filePath);
-      console.log(`📎 File uploaded: ${filePath}`);
-    } catch (e) {
-      // Try alternative method
-      const [fileChooser] = await Promise.all([
-        globalPage.waitForEvent('filechooser'),
-        globalPage.click(`${buttonSelector}, [data-testid="attach-document"]`).catch(() => {
-          // If specific button not found, try generic file input
-          return globalPage.click('input[type="file"]');
-        })
-      ]);
-      await fileChooser.setFiles(filePath);
-      console.log(`📎 File uploaded via file chooser: ${filePath}`);
-    }
-
-    await globalPage.waitForTimeout(2000);
-
-    // Add caption if provided
-    if (caption) {
-      const captionSelectors = [
-        '[data-testid="media-caption-input-container"] div[contenteditable="true"]',
-        'div[data-testid="caption-input"]',
-        'div[contenteditable="true"][data-lexical-editor="true"]'
-      ];
-
-      for (const selector of captionSelectors) {
-        try {
-          const captionBox = await globalPage.$(selector);
-          if (captionBox) {
-            await captionBox.click();
-            await captionBox.fill(caption);
-            console.log(`📝 Caption added: ${caption}`);
-            break;
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-    }
-
-    // Send the media
-    const sendSelectors = [
-      '[data-testid="send-button"]',
-      'span[data-testid="send"]',
-      'button[aria-label="Send"]',
-      'div[role="button"][aria-label="Send"]'
-    ];
-
-    let sendButton = null;
-    for (const selector of sendSelectors) {
-      try {
-        sendButton = await globalPage.waitForSelector(selector, { timeout: 10000 });
-        if (sendButton) break;
-      } catch (e) {
-        continue;
-      }
-    }
-
-    if (!sendButton) {
-      throw new Error('Send button not found');
-    }
-
-    await sendButton.click();
-    console.log(`✅ Media file sent to ${mobile}`);
-
-    // Wait for media to be sent
-    await globalPage.waitForTimeout(5000);
-
-    return { success: true, mobile, message: `Media file sent successfully: ${path.basename(filePath)}` };
-
-  } catch (error) {
-    console.error(`❌ Failed to send media to ${mobile}:`, error.message);
-    return { success: false, mobile, error: error.message };
-  }
-}
-
 // Send message with optional media
 async function sendMessage(mobile, message = '', filePath = '', caption = '', mediaType = 'auto') {
   try {
@@ -959,18 +809,6 @@ async function sendMessage(mobile, message = '', filePath = '', caption = '', me
     return { success: false, mobile, error: error.message };
   }
 }
-
-// API Routes
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    whatsappStatus: isLoggedIn ? 'Connected' : 'Disconnected',
-    timestamp: new Date().toISOString()
-  });
-});
-
 // Initialize WhatsApp session
 app.post('/initialize', async (req, res) => {
   try {
