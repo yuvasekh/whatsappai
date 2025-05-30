@@ -49,17 +49,36 @@ async function initializeWhatsApp() {
         console.log('🔍 Installing Playwright browsers...');
         const { execSync } = require('child_process');
 
-        // Force clean installation
-        execSync('npx playwright install-deps', {
-          stdio: 'inherit',
-          timeout: 180000
-        });
-        execSync('npx playwright install chromium', {
-          stdio: 'inherit',
-          timeout: 180000
-        });
+        // Try multiple installation approaches
+        const installCommands = [
+          'npx playwright install-deps chromium',
+          'npx playwright install chromium',
+          'npm run force-install',
+          'npm run install-browser'
+        ];
 
-        console.log('✅ Playwright browsers installed successfully');
+        let installSuccess = false;
+        for (const command of installCommands) {
+          try {
+            console.log(`🔄 Trying: ${command}`);
+            execSync(command, {
+              stdio: 'inherit',
+              timeout: 180000
+            });
+            console.log(`✅ Success with: ${command}`);
+            installSuccess = true;
+            break;
+          } catch (cmdError) {
+            console.log(`❌ Failed: ${command} - ${cmdError.message}`);
+            continue;
+          }
+        }
+
+        if (installSuccess) {
+          console.log('✅ Playwright browsers installed successfully');
+        } else {
+          console.log('⚠️ All installation methods failed, attempting to continue...');
+        }
       } catch (installError) {
         console.error('❌ Browser installation failed:', installError.message);
       }

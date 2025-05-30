@@ -5,9 +5,11 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "postinstall": "npx playwright install --with-deps chromium || true",
-    "start": "npx playwright install --with-deps chromium && node index.js",
-    "dev": "node index.js"
+    "postinstall": "npx playwright install-deps chromium || echo 'Deps install failed' && npx playwright install chromium || echo 'Browser install failed'",
+    "start": "node index.js",
+    "dev": "node index.js",
+    "install-browser": "npx playwright install chromium",
+    "force-install": "npx playwright install-deps chromium && npx playwright install chromium"
   },
   "dependencies": {
     "axios": "^1.9.0",
