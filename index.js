@@ -197,6 +197,10 @@ async function initializeWhatsApp() {
     }
 
     console.log('✅ QR code extracted successfully');
+
+    // Start monitoring for QR scan completion
+    monitorQRScanCompletion();
+
     return {
       loggedIn: false,
       qrCode: qrResult.qrCode,
@@ -414,6 +418,77 @@ async function extractQRCode() {
       success: false,
       error: error.message
     };
+  }
+}
+
+// Monitor QR scan completion and page transition
+async function monitorQRScanCompletion() {
+  try {
+    console.log('🔍 Starting QR scan monitoring...');
+
+    const env = detectEnvironment();
+    const maxWaitTime = env.isCloud ? 300000 : 180000; // 5 minutes cloud, 3 minutes local
+    const startTime = Date.now();
+
+    const checkInterval = setInterval(async () => {
+      try {
+        if (!globalPage) {
+          clearInterval(checkInterval);
+          return;
+        }
+
+        // Take periodic screenshots to track progress
+        const timestamp = Date.now();
+        await globalPage.screenshot({
+          path: `qr-monitor-${timestamp}.png`,
+          fullPage: true
+        });
+
+        // Check if we've transitioned to chat interface
+        const loginResult = await checkLoginStatus();
+
+        if (loginResult.loggedIn) {
+          console.log('✅ QR scan completed! User is now logged in');
+          isLoggedIn = true;
+          clearInterval(checkInterval);
+
+          // Take final screenshot
+          await globalPage.screenshot({
+            path: `qr-scan-success-${timestamp}.png`,
+            fullPage: true
+          });
+
+          return;
+        }
+
+        // Check if QR code has expired or changed
+        const currentUrl = await globalPage.url();
+        if (!currentUrl.includes('web.whatsapp.com')) {
+          console.log('⚠️ Page navigated away from WhatsApp Web');
+          clearInterval(checkInterval);
+          return;
+        }
+
+        // Check for timeout
+        if ((Date.now() - startTime) > maxWaitTime) {
+          console.log('⏰ QR scan monitoring timeout reached');
+          clearInterval(checkInterval);
+
+          // Take timeout screenshot
+          await globalPage.screenshot({
+            path: `qr-scan-timeout-${timestamp}.png`,
+            fullPage: true
+          });
+          return;
+        }
+
+      } catch (error) {
+        console.log('⚠️ Error during QR monitoring:', error.message);
+      }
+    }, 10000); // Check every 10 seconds
+
+  } catch (error) {
+    console.error('❌ QR scan monitoring failed:', error.message);
   }
 }
 
@@ -1193,12 +1268,12 @@ app.post('/send-message', async (req, res) => {
       });
     }
 
-    if (!isLoggedIn || !globalPage) {
-      return res.status(400).json({
-        success: false,
-        error: 'WhatsApp session not initialized. Please call /initialize first.'
-      });
-    }
+    // if (!isLoggedIn || !globalPage) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     error: 'WhatsApp session not initialized. Please call /initialize first.'
+    //   });
+    // }
 
     const result = await sendTextMessage(mobile, message);
     res.json(result);
@@ -1213,27 +1288,90 @@ app.post('/send-message', async (req, res) => {
 });
 
 
+// List all debug screenshots and files
 app.get('/api/screenshots', (req, res) => {
-  const dirPath = path.join(__dirname, 'public');
+  try {
+    const serverDir = __dirname;
+    const publicDir = path.join(__dirname, 'public');
 
-  fs.readdir(dirPath, (err, files) => {
-    if (err) {
-      return res.status(500).json({ error: 'Unable to read screenshot directory.' });
+    // Read files from both server root and public directory
+    const readDirectory = (dirPath) => {
+      try {
+        if (!fs.existsSync(dirPath)) {
+          return [];
+        }
+        return fs.readdirSync(dirPath).filter(file =>
+          file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')
+        );
+      } catch (err) {
+        console.log(`Error reading directory ${dirPath}:`, err.message);
+        return [];
+      }
+    };
+
+    const serverFiles = readDirectory(serverDir);
+    const publicFiles = readDirectory(publicDir);
+
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+
+    const screenshots = [
+      ...serverFiles.map(file => ({
+        filename: file,
+        location: 'server',
+        url: `${baseUrl}/debug-files/${file}`,
+        size: fs.existsSync(path.join(serverDir, file)) ? fs.statSync(path.join(serverDir, file)).size : 0,
+        modified: fs.existsSync(path.join(serverDir, file)) ? fs.statSync(path.join(serverDir, file)).mtime : null
+      })),
+      ...publicFiles.map(file => ({
+        filename: file,
+        location: 'public',
+        url: `${baseUrl}/public/${file}`,
+        size: fs.existsSync(path.join(publicDir, file)) ? fs.statSync(path.join(publicDir, file)).size : 0,
+        modified: fs.existsSync(path.join(publicDir, file)) ? fs.statSync(path.join(publicDir, file)).mtime : null
+      }))
+    ];
+
+    // Sort by modification time (newest first)
+    screenshots.sort((a, b) => new Date(b.modified) - new Date(a.modified));
+
+    res.json({
+      success: true,
+      count: screenshots.length,
+      screenshots,
+      directories: {
+        server: serverDir,
+        public: publicDir
+      }
+    });
+  } catch (error) {
+    console.error('Error listing screenshots:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Unable to read screenshot directories.',
+      details: error.message
+    });
+  }
+});
+
+// Serve debug files from server directory
+app.get('/debug-files/:filename', (req, res) => {
+  try {
+    const filename = req.params.filename;
+    const filePath = path.join(__dirname, filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'File not found' });
     }
 
-    const imageFiles = files.filter(file =>
-      file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')
-    );
+    // Security check - only allow image files
+    if (!filename.match(/\.(png|jpg|jpeg)$/i)) {
+      return res.status(400).json({ error: 'Invalid file type' });
+    }
 
-    const baseUrl = `${req.protocol}://${req.get('host')}/public`;
-
-    const screenshots = imageFiles.map(file => ({
-      filename: file,
-      url: `${baseUrl}/${file}`
-    }));
-
-    res.json({ count: screenshots.length, screenshots });
-  });
+    res.sendFile(filePath);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Send bulk messages (enhanced to support media)
