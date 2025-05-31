@@ -17,6 +17,7 @@ app.use(cors());
 let globalBrowser = null;
 let globalPage = null;
 let isLoggedIn = false;
+let isWhatsAppReady = false;
 
 // Enhanced environment detection
 function detectEnvironment() {
@@ -553,6 +554,7 @@ async function waitForWhatsAppReady() {
 
             // Additional stability wait
             await globalPage.waitForTimeout(5000);
+            isWhatsAppReady = true; // Set the flag
             return true;
           }
         } catch (e) {
@@ -577,7 +579,14 @@ async function navigateToChat(mobile) {
   try {
     console.log(`📞 Navigating to chat: ${mobile}`);
 
-    await waitForWhatsAppReady();
+    // Only wait for WhatsApp to be ready if it's not already ready
+    if (!isWhatsAppReady) {
+      console.log('⏳ WhatsApp not ready yet, waiting...');
+      await waitForWhatsAppReady();
+    } else {
+      console.log('✅ WhatsApp already ready, proceeding...');
+    }
+
     await handleDialogs();
 
     const env = detectEnvironment();
@@ -920,6 +929,7 @@ async function cleanup() {
       globalBrowser = null;
       globalPage = null;
       isLoggedIn = false;
+      isWhatsAppReady = false; // Reset the ready flag
       console.log('🧹 Browser cleaned up');
     }
   } catch (error) {
