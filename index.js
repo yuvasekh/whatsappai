@@ -579,69 +579,93 @@ async function navigateToChat(mobile) {
   try {
     console.log(`📞 Navigating to chat: ${mobile}`);
 
-    // Only wait for WhatsApp to be ready if it's not already ready
     if (!isWhatsAppReady) {
       console.log('⏳ WhatsApp not ready yet, waiting...');
       await waitForWhatsAppReady();
-    } else {
-      console.log('✅ WhatsApp already ready, proceeding...');
     }
 
     await handleDialogs();
 
-    // Format phone number (remove + if present)
-    const cleanNumber = mobile.replace(/^\+/, '');
+    // Format number properly (remove + and any non-digits)
+    const cleanNumber = mobile.replace(/[^\d]/g, '');
+    
+    // Use wa.me URL for reliable navigation to both saved and unsaved numbers
     const waUrl = `https://web.whatsapp.com/send?phone=${cleanNumber}`;
+    
+    console.log(`🌐 Directly refreshing page with URL: ${waUrl}`);
+    
+    // Instead of navigate then refresh, directly refresh with the URL
+    // This works better for unsaved numbers
+    await globalPage.goto(waUrl, {
+      waitUntil: 'networkidle',
+      timeout: 30000
+    });
 
-    console.log(`🔗 Using WhatsApp Web URL: ${waUrl}`);
-
-    // Navigate within the same session using JavaScript
-    await globalPage.evaluate((url) => {
-      window.location.href = url;
-    }, waUrl);
-
-    // Wait for navigation to complete
-    await globalPage.waitForLoadState('networkidle', { timeout: 30000 });
-
-    // Wait for page to load and handle any dialogs
+    // Wait for page load
     await globalPage.waitForTimeout(3000);
+    
+    // Handle any dialogs that might appear
     await handleDialogs();
 
-    // Verify we're in a chat interface
-    const chatVerificationSelectors = [
+    // Wait for chat interface to load with multiple possible selectors
+    const chatSelectors = [
       '[data-testid="conversation-compose-box-input"]',
       'div[contenteditable="true"][data-tab="10"]',
       '[role="textbox"][data-tab="10"]',
-      '[data-testid="msg-container"]',
-      'div[data-testid="conversation-panel-body"]'
+      'div[contenteditable="true"][data-lexical-editor="true"]',
+      'div[data-testid="compose-input"]',
+      'footer[data-testid="compose"]',
+      '[data-testid="compose-box-input"]'
     ];
 
-    let chatInterfaceFound = false;
-    for (const selector of chatVerificationSelectors) {
+    let chatFound = false;
+    let workingSelector = null;
+    
+    for (const selector of chatSelectors) {
       try {
-        const element = await globalPage.waitForSelector(selector, {
-          timeout: 10000,
+        await globalPage.waitForSelector(selector, {
+          timeout: 15000,
           state: 'visible'
         });
-
-        if (element && await element.isVisible()) {
-          console.log(`✅ Chat interface verified with: ${selector}`);
-          chatInterfaceFound = true;
-          break;
+        
+        // Double check the element is actually interactable
+        const element = await globalPage.$(selector);
+        if (element) {
+          const isVisible = await element.isVisible();
+          const isEnabled = await element.isEnabled();
+          
+          if (isVisible && isEnabled) {
+            chatFound = true;
+            workingSelector = selector;
+            console.log(`✅ Chat interface loaded with selector: ${selector}`);
+            break;
+          }
         }
       } catch (e) {
         continue;
       }
     }
 
-    if (!chatInterfaceFound) {
+    if (!chatFound) {
       // Take debug screenshot
       await globalPage.screenshot({
-        path: `debug-chat-not-found-${Date.now()}.png`,
+        path: `debug-chat-not-found-${cleanNumber}-${Date.now()}.png`,
         fullPage: true
       });
-
       throw new Error('Chat interface not found after navigation');
+    }
+
+    // Additional wait to ensure everything is loaded and stable
+    await globalPage.waitForTimeout(3000);
+
+    // Try to focus on the chat input to make sure it's ready
+    if (workingSelector) {
+      try {
+        await globalPage.click(workingSelector);
+        console.log('🎯 Chat input focused and ready');
+      } catch (e) {
+        console.log('⚠️ Could not focus chat input, but proceeding...');
+      }
     }
 
     console.log(`✅ Successfully navigated to chat: ${mobile}`);
@@ -650,11 +674,11 @@ async function navigateToChat(mobile) {
   } catch (error) {
     console.error(`❌ Failed to navigate to chat ${mobile}:`, error.message);
 
-    // Take debug screenshot on failure
+    // Take debug screenshot
     try {
       await globalPage.screenshot({
-        path: `debug-nav-fail-${mobile}-${Date.now()}.png`,
-        fullPage: true
+        path: `debug-nav-fail-${mobile.replace(/[^\d]/g, '')}-${Date.now()}.png`,
+        fullPage: true,
       });
     } catch (e) {
       console.log('Could not take debug screenshot');
@@ -663,6 +687,7 @@ async function navigateToChat(mobile) {
     throw error;
   }
 }
+
 
 // Enhanced dialog handler
 async function handleDialogs() {
@@ -696,7 +721,6 @@ async function handleDialogs() {
     console.log('⚠️ Error handling dialogs:', error.message);
   }
 }
-
 // Enhanced send text message
 async function sendTextMessage(mobile, message) {
   try {
@@ -909,18 +933,6 @@ async function cleanup() {
     console.log('⚠️ Error during cleanup:', error.message);
   }
 }
-
-// Health check endpoint for Render
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    browserActive: !!globalBrowser,
-    loggedIn: isLoggedIn
-  });
-});
-
-// Initialize WhatsApp session
 app.post('/initialize', async (req, res) => {
   try {
     if (isLoggedIn && globalBrowser) {
@@ -947,496 +959,6 @@ app.post('/initialize', async (req, res) => {
     });
   }
 });
-// Static screenshot file endpoint (for debug files)
-app.get('/debug-screenshot', (req, res) => {
-  const screenshotPath = path.join(__dirname, 'debug-whatsapp-full.png');
-  res.sendFile(screenshotPath);
-});
-// Get QR Code endpoint
-app.get('/qr-code', async (req, res) => {
-  try {
-    if (isLoggedIn) {
-      return res.json({
-        success: false,
-        message: 'Already logged in, no QR code needed'
-      });
-    }
-
-    if (!globalPage) {
-      return res.status(400).json({
-        success: false,
-        message: 'WhatsApp session not initialized. Please call /initialize first.'
-      });
-    }
-
-    // Try to get fresh QR code using multiple selectors
-    try {
-      const qrSelectors = [
-        'canvas[aria-label*="Scan this QR code to link a device"]',
-        '[data-testid="qr-code"]',
-        'canvas[aria-label*="QR"]',
-        'canvas[aria-label*="Scan"]',
-        'img[alt*="QR"]',
-        'img[alt*="Scan"]',
-        'canvas[role="img"]',
-        'div[data-testid="qr-code"] canvas',
-        'div[data-testid="qr-code"] img'
-      ];
-
-      let qrElement = null;
-      let usedSelector = '';
-
-      // Try each selector
-      for (const selector of qrSelectors) {
-        try {
-          qrElement = await globalPage.$(selector);
-          if (qrElement) {
-            usedSelector = selector;
-            break;
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-
-      if (qrElement) {
-        let qrDataUrl = null;
-        const tagName = await qrElement.evaluate(node => node.tagName);
-
-        if (tagName === 'CANVAS') {
-          qrDataUrl = await qrElement.evaluate(canvas => canvas.toDataURL());
-        } else if (tagName === 'IMG') {
-          qrDataUrl = await qrElement.getAttribute('src');
-        }
-
-        if (qrDataUrl && (qrDataUrl.startsWith('data:image') || qrDataUrl.startsWith('http'))) {
-          return res.json({
-            success: true,
-            qrCode: qrDataUrl,
-            message: `QR code extracted successfully using selector: ${usedSelector}`
-          });
-        }
-      }
-
-      // If QR code not found, try refreshing the page
-      console.log('⚠️ QR code not found, attempting page refresh...');
-      try {
-        await globalPage.reload({ waitUntil: 'networkidle' });
-        await globalPage.waitForTimeout(3000);
-
-        // Try again after refresh
-        for (const selector of qrSelectors) {
-          try {
-            qrElement = await globalPage.$(selector);
-            if (qrElement) {
-              usedSelector = selector;
-              break;
-            }
-          } catch (e) {
-            continue;
-          }
-        }
-
-        if (qrElement) {
-          let qrDataUrl = null;
-          const tagName = await qrElement.evaluate(node => node.tagName);
-
-          if (tagName === 'CANVAS') {
-            qrDataUrl = await qrElement.evaluate(canvas => canvas.toDataURL());
-          } else if (tagName === 'IMG') {
-            qrDataUrl = await qrElement.getAttribute('src');
-          }
-
-          if (qrDataUrl && (qrDataUrl.startsWith('data:image') || qrDataUrl.startsWith('http'))) {
-            return res.json({
-              success: true,
-              qrCode: qrDataUrl,
-              message: `QR code extracted after page refresh using selector: ${usedSelector}`
-            });
-          }
-        }
-      } catch (refreshError) {
-        console.log('❌ Page refresh failed:', refreshError.message);
-      }
-
-      return res.status(404).json({
-        success: false,
-        message: 'QR code not found even after page refresh. It may have expired or you may already be logged in.',
-        suggestion: 'Try calling /initialize again to restart the session'
-      });
-
-    } catch (error) {
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to extract QR code: ' + error.message
-      });
-    }
-
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Force refresh WhatsApp Web page
-app.post('/refresh', async (req, res) => {
-  try {
-    if (!globalPage) {
-      return res.status(400).json({
-        success: false,
-        message: 'WhatsApp session not initialized. Please call /initialize first.'
-      });
-    }
-
-    console.log('🔄 Force refreshing WhatsApp Web page...');
-
-    // Reload the page
-    await globalPage.reload({ waitUntil: 'networkidle' });
-    await globalPage.waitForTimeout(5000);
-
-    // Check if we're still on WhatsApp Web
-    const currentUrl = await globalPage.url();
-    if (!currentUrl.includes('web.whatsapp.com')) {
-      return res.status(400).json({
-        success: false,
-        message: 'Page navigation failed. Current URL: ' + currentUrl
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'WhatsApp Web page refreshed successfully',
-      url: currentUrl,
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('❌ Page refresh failed:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Get page screenshot for debugging
-app.get('/screenshot', async (req, res) => {
-  try {
-    // Check if browser and page are still valid
-    if (!globalBrowser || !globalPage) {
-      return res.status(400).json({
-        success: false,
-        message: 'WhatsApp session not initialized. Please call /initialize first.',
-        browserActive: !!globalBrowser,
-        pageActive: !!globalPage
-      });
-    }
-
-    // Check if page is still connected
-    try {
-      await globalPage.evaluate(() => window.location.href);
-    } catch (error) {
-      return res.status(400).json({
-        success: false,
-        message: 'Browser page is disconnected. Please reinitialize the session.',
-        error: error.message
-      });
-    }
-
-    console.log('📸 Taking page screenshot for debugging...');
-
-    // Take full page screenshot
-    const screenshot = await globalPage.screenshot({
-      type: 'png',
-      fullPage: true,
-      encoding: 'base64'
-    });
-
-    // Get page info for context
-    const pageInfo = await globalPage.evaluate(() => {
-      return {
-        url: window.location.href,
-        title: document.title,
-        bodyText: document.body.innerText?.substring(0, 500),
-        canvasCount: document.querySelectorAll('canvas').length,
-        imgCount: document.querySelectorAll('img').length,
-        viewport: {
-          width: window.innerWidth,
-          height: window.innerHeight
-        }
-      };
-    });
-
-    res.json({
-      success: true,
-      screenshot: `data:image/png;base64,${screenshot}`,
-      pageInfo: pageInfo,
-      message: 'Screenshot captured successfully',
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('❌ Screenshot failed:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Get detailed page analysis for debugging
-app.get('/debug-page', async (req, res) => {
-  try {
-    if (!globalPage) {
-      return res.status(400).json({
-        success: false,
-        message: 'WhatsApp session not initialized. Please call /initialize first.'
-      });
-    }
-
-    console.log('🔍 Running detailed page analysis...');
-
-    // Get comprehensive page analysis
-    const analysis = await globalPage.evaluate(() => {
-      // Get all canvas elements with detailed info
-      const canvases = Array.from(document.querySelectorAll('canvas')).map((canvas, index) => ({
-        index,
-        ariaLabel: canvas.getAttribute('aria-label'),
-        className: canvas.className,
-        id: canvas.id,
-        role: canvas.getAttribute('role'),
-        width: canvas.width,
-        height: canvas.height,
-        offsetWidth: canvas.offsetWidth,
-        offsetHeight: canvas.offsetHeight,
-        visible: canvas.offsetParent !== null,
-        display: window.getComputedStyle(canvas).display,
-        opacity: window.getComputedStyle(canvas).opacity,
-        parentElement: canvas.parentElement?.tagName,
-        parentClass: canvas.parentElement?.className,
-        boundingRect: canvas.getBoundingClientRect()
-      }));
-
-      // Get all images
-      const images = Array.from(document.querySelectorAll('img')).map((img, index) => ({
-        index,
-        src: img.src?.substring(0, 100),
-        alt: img.alt,
-        className: img.className,
-        id: img.id,
-        width: img.width,
-        height: img.height,
-        visible: img.offsetParent !== null,
-        boundingRect: img.getBoundingClientRect()
-      }));
-
-      // Get elements with data-testid
-      const testIdElements = Array.from(document.querySelectorAll('[data-testid]')).map(el => ({
-        testId: el.getAttribute('data-testid'),
-        tagName: el.tagName,
-        className: el.className,
-        textContent: el.textContent?.substring(0, 100),
-        visible: el.offsetParent !== null
-      }));
-
-      // Look for QR-related text
-      const qrRelatedText = Array.from(document.querySelectorAll('*'))
-        .filter(el => el.textContent && (
-          el.textContent.toLowerCase().includes('qr') ||
-          el.textContent.toLowerCase().includes('scan') ||
-          el.textContent.toLowerCase().includes('code') ||
-          el.textContent.toLowerCase().includes('whatsapp')
-        ))
-        .map(el => ({
-          tagName: el.tagName,
-          textContent: el.textContent?.substring(0, 200),
-          className: el.className,
-          id: el.id
-        }))
-        .slice(0, 20); // Limit results
-
-      return {
-        url: window.location.href,
-        title: document.title,
-        bodyText: document.body.innerText?.substring(0, 1000),
-        canvases,
-        images,
-        testIdElements,
-        qrRelatedText,
-        viewport: {
-          width: window.innerWidth,
-          height: window.innerHeight
-        },
-        userAgent: navigator.userAgent,
-        timestamp: new Date().toISOString()
-      };
-    });
-
-    // Take a screenshot too
-    const screenshot = await globalPage.screenshot({
-      type: 'png',
-      fullPage: true,
-      encoding: 'base64'
-    });
-
-    res.json({
-      success: true,
-      analysis,
-      screenshot: `data:image/png;base64,${screenshot}`,
-      message: 'Page analysis completed successfully'
-    });
-
-  } catch (error) {
-    console.error('❌ Page analysis failed:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Get WhatsApp list
-app.get('/get-whatsapp-list', async (req, res) => {
-  const { userid, secret, method = 'list_whatsapp_l' } = req.query;
-  console.log(req.query);
-
-  if (!userid || !secret) {
-    return res.status(400).json({ success: false, message: 'Missing userid or secret' });
-  }
-
-  try {
-    const response = await axios.get('http://smsguruji.com/wa/api/wa.php', {
-      params: { method, userid, secret }
-    });
-
-    res.json(response.data);
-  } catch (error) {
-    console.error('Error calling smsguruji API:', error.message);
-    res.status(500).json({ success: false, message: 'Failed to fetch WhatsApp list' });
-  }
-});
-
-// Send single message (text only)
-app.post('/send-message', async (req, res) => {
-  try {
-    const { mobile, message } = req.body;
-
-    if (!mobile || !message) {
-      return res.status(400).json({
-        success: false,
-        error: 'Mobile number and message are required'
-      });
-    }
-
-    // if (!isLoggedIn || !globalPage) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     error: 'WhatsApp session not initialized. Please call /initialize first.'
-    //   });
-    // }
-
-    const result = await sendTextMessage(mobile, message);
-    res.json(result);
-
-  } catch (error) {
-    console.error('❌ Send message error:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-
-// List all debug screenshots and files
-app.get('/api/screenshots', (req, res) => {
-  try {
-    const serverDir = __dirname;
-    const publicDir = path.join(__dirname, 'public');
-
-    // Read files from both server root and public directory
-    const readDirectory = (dirPath) => {
-      try {
-        if (!fs.existsSync(dirPath)) {
-          return [];
-        }
-        return fs.readdirSync(dirPath).filter(file =>
-          file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')
-        );
-      } catch (err) {
-        console.log(`Error reading directory ${dirPath}:`, err.message);
-        return [];
-      }
-    };
-
-    const serverFiles = readDirectory(serverDir);
-    const publicFiles = readDirectory(publicDir);
-
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-
-    const screenshots = [
-      ...serverFiles.map(file => ({
-        filename: file,
-        location: 'server',
-        url: `${baseUrl}/debug-files/${file}`,
-        size: fs.existsSync(path.join(serverDir, file)) ? fs.statSync(path.join(serverDir, file)).size : 0,
-        modified: fs.existsSync(path.join(serverDir, file)) ? fs.statSync(path.join(serverDir, file)).mtime : null
-      })),
-      ...publicFiles.map(file => ({
-        filename: file,
-        location: 'public',
-        url: `${baseUrl}/public/${file}`,
-        size: fs.existsSync(path.join(publicDir, file)) ? fs.statSync(path.join(publicDir, file)).size : 0,
-        modified: fs.existsSync(path.join(publicDir, file)) ? fs.statSync(path.join(publicDir, file)).mtime : null
-      }))
-    ];
-
-    // Sort by modification time (newest first)
-    screenshots.sort((a, b) => new Date(b.modified) - new Date(a.modified));
-
-    res.json({
-      success: true,
-      count: screenshots.length,
-      screenshots,
-      directories: {
-        server: serverDir,
-        public: publicDir
-      }
-    });
-  } catch (error) {
-    console.error('Error listing screenshots:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Unable to read screenshot directories.',
-      details: error.message
-    });
-  }
-});
-
-// Serve debug files from server directory
-app.get('/debug-files/:filename', (req, res) => {
-  try {
-    const filename = req.params.filename;
-    const filePath = path.join(__dirname, filename);
-
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: 'File not found' });
-    }
-
-    // Security check - only allow image files
-    if (!filename.match(/\.(png|jpg|jpeg)$/i)) {
-      return res.status(400).json({ error: 'Invalid file type' });
-    }
-
-    res.sendFile(filePath);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Send bulk messages (enhanced to support media)
 app.post('/send-messages', async (req, res) => {
   try {
     const { whatsapp } = req.body;
@@ -1525,218 +1047,107 @@ app.post('/send-messages', async (req, res) => {
     });
   }
 });
+// Static screenshot file endpoint (for debug files)
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    browserActive: !!globalBrowser,
+    loggedIn: isLoggedIn
+  });
+});
+app.get('/debug-screenshot', (req, res) => {
+  const screenshotPath = path.join(__dirname, 'debug-whatsapp-full.png');
+  res.sendFile(screenshotPath);
+});
 
-// Debug screenshot endpoint for send-messages issues
-app.get('/debug-send-messages', async (req, res) => {
+// Get WhatsApp list
+app.get('/get-whatsapp-list', async (req, res) => {
+  const { userid, secret, method = 'list_whatsapp_l' } = req.query;
+  console.log(req.query);
+
+  if (!userid || !secret) {
+    return res.status(400).json({ success: false, message: 'Missing userid or secret' });
+  }
+
   try {
-    if (!globalPage || !globalBrowser) {
-      return res.status(400).json({
-        success: false,
-        message: 'WhatsApp session not initialized',
-        debug: {
-          browserActive: !!globalBrowser,
-          pageActive: !!globalPage,
-          isLoggedIn: isLoggedIn
+    const response = await axios.get('http://smsguruji.com/wa/api/wa.php', {
+      params: { method, userid, secret }
+    });
+
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error calling smsguruji API:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to fetch WhatsApp list' });
+  }
+});
+
+// Send single message (text only
+// List all debug screenshots and files
+app.get('/api/screenshots', (req, res) => {
+  try {
+    const serverDir = __dirname;
+    const publicDir = path.join(__dirname, 'public');
+
+    // Read files from both server root and public directory
+    const readDirectory = (dirPath) => {
+      try {
+        if (!fs.existsSync(dirPath)) {
+          return [];
         }
-      });
-    }
+        return fs.readdirSync(dirPath).filter(file =>
+          file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')
+        );
+      } catch (err) {
+        console.log(`Error reading directory ${dirPath}:`, err.message);
+        return [];
+      }
+    };
 
-    console.log('📸 Taking debug screenshot for send-messages...');
+    const serverFiles = readDirectory(serverDir);
+    const publicFiles = readDirectory(publicDir);
 
-    // Take screenshot
-    const screenshot = await globalPage.screenshot({
-      type: 'png',
-      fullPage: true,
-      encoding: 'base64'
-    });
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
 
-    // Get detailed page analysis
-    const pageAnalysis = await globalPage.evaluate(() => {
-      // Check for search box
-      const searchSelectors = [
-        '[data-testid="chat-list-search"]',
-        'div[contenteditable="true"][data-tab="3"]',
-        'div[role="textbox"][data-tab="3"]',
-        '[title="Search or start new chat"]',
-        '[placeholder*="Search"]'
-      ];
+    const screenshots = [
+      ...serverFiles.map(file => ({
+        filename: file,
+        location: 'server',
+        url: `${baseUrl}/debug-files/${file}`,
+        size: fs.existsSync(path.join(serverDir, file)) ? fs.statSync(path.join(serverDir, file)).size : 0,
+        modified: fs.existsSync(path.join(serverDir, file)) ? fs.statSync(path.join(serverDir, file)).mtime : null
+      })),
+      ...publicFiles.map(file => ({
+        filename: file,
+        location: 'public',
+        url: `${baseUrl}/public/${file}`,
+        size: fs.existsSync(path.join(publicDir, file)) ? fs.statSync(path.join(publicDir, file)).size : 0,
+        modified: fs.existsSync(path.join(publicDir, file)) ? fs.statSync(path.join(publicDir, file)).mtime : null
+      }))
+    ];
 
-      const searchBoxes = searchSelectors.map(selector => {
-        const element = document.querySelector(selector);
-        return {
-          selector,
-          found: !!element,
-          visible: element ? element.offsetParent !== null : false,
-          text: element ? element.textContent || element.value || '' : '',
-          placeholder: element ? element.placeholder || '' : ''
-        };
-      });
-
-      // Check for message input box
-      const messageSelectors = [
-        '[data-testid="conversation-compose-box-input"]',
-        'div[contenteditable="true"][data-tab="10"]',
-        '[role="textbox"][data-tab="10"]',
-        'div[contenteditable="true"][data-lexical-editor="true"]'
-      ];
-
-      const messageBoxes = messageSelectors.map(selector => {
-        const element = document.querySelector(selector);
-        return {
-          selector,
-          found: !!element,
-          visible: element ? element.offsetParent !== null : false
-        };
-      });
-
-      // Check for dialogs
-      const dialogSelectors = [
-        'button:has-text("Continue")',
-        '[role="button"]:has-text("OK")',
-        'div[data-testid="modal"]',
-        'button[data-testid="continue-button"]'
-      ];
-
-      const dialogs = dialogSelectors.map(selector => {
-        const element = document.querySelector(selector);
-        return {
-          selector,
-          found: !!element,
-          visible: element ? element.offsetParent !== null : false
-        };
-      });
-
-      return {
-        url: window.location.href,
-        title: document.title,
-        searchBoxes,
-        messageBoxes,
-        dialogs,
-        bodyText: document.body.innerText?.substring(0, 1000),
-        timestamp: new Date().toISOString()
-      };
-    });
+    // Sort by modification time (newest first)
+    screenshots.sort((a, b) => new Date(b.modified) - new Date(a.modified));
 
     res.json({
       success: true,
-      screenshot: `data:image/png;base64,${screenshot}`,
-      analysis: pageAnalysis,
-      message: 'Debug screenshot and analysis completed'
+      count: screenshots.length,
+      screenshots,
+      directories: {
+        server: serverDir,
+        public: publicDir
+      }
     });
-
   } catch (error) {
-    console.error('❌ Debug screenshot failed:', error.message);
+    console.error('Error listing screenshots:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Unable to read screenshot directories.',
+      details: error.message
     });
   }
 });
-
-// Force complete loading state
-app.post('/force-complete-loading', async (req, res) => {
-  try {
-    if (!globalPage || !globalBrowser) {
-      return res.status(400).json({
-        success: false,
-        message: 'WhatsApp session not initialized'
-      });
-    }
-
-    console.log('🔄 Forcing completion of loading state...');
-
-    // Take screenshot before action
-    await globalPage.screenshot({
-      path: `before-force-loading-${Date.now()}.png`,
-      fullPage: true
-    });
-
-    // Check current state
-    const pageAnalysis = await globalPage.evaluate(() => {
-      const bodyText = document.body.innerText;
-      return {
-        url: window.location.href,
-        title: document.title,
-        hasLoadingText: bodyText.includes('Loading chats') || bodyText.includes('Loading...'),
-        bodyText: bodyText.substring(0, 500)
-      };
-    });
-
-    console.log('📊 Current page state:', pageAnalysis);
-
-    // Try multiple approaches to complete loading
-    const completionMethods = [
-      // Method 1: Refresh the page
-      async () => {
-        console.log('🔄 Method 1: Refreshing page...');
-        await globalPage.reload({ waitUntil: 'networkidle' });
-        await globalPage.waitForTimeout(5000);
-      },
-
-      // Method 2: Navigate to WhatsApp Web again
-      async () => {
-        console.log('🔄 Method 2: Re-navigating to WhatsApp Web...');
-        await globalPage.goto('https://web.whatsapp.com/', { waitUntil: 'networkidle' });
-        await globalPage.waitForTimeout(5000);
-      },
-
-      // Method 3: Try keyboard shortcuts
-      async () => {
-        console.log('🔄 Method 3: Trying keyboard shortcuts...');
-        await globalPage.keyboard.press('F5'); // Refresh
-        await globalPage.waitForTimeout(3000);
-        await globalPage.keyboard.press('Escape'); // Close any dialogs
-        await globalPage.waitForTimeout(2000);
-      }
-    ];
-
-    let success = false;
-    for (const method of completionMethods) {
-      try {
-        await method();
-
-        // Check if loading completed
-        const loginResult = await checkLoginStatus();
-        if (loginResult.loggedIn) {
-          success = true;
-          console.log('✅ Loading completed successfully!');
-          break;
-        }
-      } catch (e) {
-        console.log('⚠️ Method failed:', e.message);
-        continue;
-      }
-    }
-
-    // Take screenshot after action
-    await globalPage.screenshot({
-      path: `after-force-loading-${Date.now()}.png`,
-      fullPage: true
-    });
-
-    if (success) {
-      isLoggedIn = true;
-      res.json({
-        success: true,
-        message: 'Loading state completed successfully',
-        loggedIn: true
-      });
-    } else {
-      res.json({
-        success: false,
-        message: 'Could not complete loading state',
-        pageAnalysis
-      });
-    }
-
-  } catch (error) {
-    console.error('❌ Force loading completion failed:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
+// Send bulk messages (enhanced to support media)
 
 // Close WhatsApp session
 app.post('/close', async (req, res) => {
