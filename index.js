@@ -51,7 +51,6 @@ async function initializeWhatsApp() {
 
         // Try multiple installation approaches
         const installCommands = [
-          'npx playwright install-deps chromium',
           'npx playwright install chromium',
           'npm run force-install',
           'npm run install-browser'
@@ -624,8 +623,8 @@ async function navigateToChat(mobile) {
     await searchBox.click();
     await globalPage.waitForTimeout(1000);
 
-    // Clear and enter phone number
-    await globalPage.keyboard.selectAll();
+    // Clear and enter phone number (using proper Playwright methods)
+    await searchBox.selectText();
     await globalPage.keyboard.press('Delete');
     await globalPage.waitForTimeout(500);
 
@@ -767,8 +766,8 @@ async function sendTextMessage(mobile, message) {
     await messageBox.click();
     await globalPage.waitForTimeout(1000);
 
-    // Clear any existing content
-    await globalPage.keyboard.selectAll();
+    // Clear any existing content (using proper Playwright methods)
+    await messageBox.selectText();
     await globalPage.keyboard.press('Delete');
     await globalPage.waitForTimeout(500);
 
