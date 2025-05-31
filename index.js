@@ -891,29 +891,104 @@ async function sendTextMessage(mobile, message) {
   }
 }
 
-// Send message function (unchanged from your original)
-async function sendMessage(mobile, message = '', filePath = '', caption = '', mediaType = 'auto') {
+// Send combined message (image + caption + text together)
+async function sendCombinedMessage(mobile, message = '', mediaUrl = '', caption = '') {
   try {
-    const results = [];
+    console.log(`📤 Sending combined message to ${mobile}:`, {
+      hasMessage: !!message,
+      hasMedia: !!mediaUrl,
+      hasCaption: !!caption
+    });
 
-    if (message) {
-      const textResult = await sendTextMessage(mobile, message);
-      results.push(textResult);
+    // Navigate to chat once
+    await navigateToChat(mobile);
+    await handleDialogs();
+
+    // Find message input box
+    const messageSelectors = [
+      '[data-testid="conversation-compose-box-input"]',
+      'div[contenteditable="true"][data-tab="10"]',
+      '[role="textbox"][data-tab="10"]',
+      'div[contenteditable="true"][data-lexical-editor="true"]'
+    ];
+
+    let messageBox = null;
+    for (const selector of messageSelectors) {
+      try {
+        messageBox = await globalPage.$(selector);
+        if (messageBox && await messageBox.isVisible()) {
+          console.log(`✅ Found message box: ${selector}`);
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
     }
 
-    const allSuccessful = results.every(r => r.success);
-    const combinedMessage = results.map(r => r.message).join('; ');
-    const combinedError = results.filter(r => !r.success).map(r => r.error).join('; ');
+    if (!messageBox) {
+      throw new Error('Message input box not found');
+    }
 
+    // Click and clear message box
+    await messageBox.click();
+    await globalPage.waitForTimeout(500);
+    await messageBox.selectText();
+    await globalPage.keyboard.press('Delete');
+    await globalPage.waitForTimeout(500);
+
+    // Combine all content into one message
+    let combinedContent = '';
+
+    // Add image URL first
+    if (mediaUrl) {
+      combinedContent += mediaUrl;
+    }
+
+    // Add caption if provided
+    if (caption) {
+      combinedContent += combinedContent ? `\n${caption}` : caption;
+    }
+
+    // Add message if provided
+    if (message) {
+      combinedContent += combinedContent ? `\n${message}` : message;
+    }
+
+    if (!combinedContent) {
+      throw new Error('No content to send');
+    }
+
+    console.log(`📝 Combined content to send:\n${combinedContent}`);
+
+    // Type the combined content
+    await messageBox.type(combinedContent, { delay: 50 });
+    await globalPage.waitForTimeout(2000);
+
+    // Send the message
+    await globalPage.keyboard.press('Enter');
+    await globalPage.waitForTimeout(3000);
+
+    console.log(`✅ Combined message sent to ${mobile}`);
     return {
-      success: allSuccessful,
+      success: true,
       mobile,
-      message: allSuccessful ? combinedMessage : combinedError,
-      details: results
+      message: 'Combined message (image + caption + text) sent successfully',
+      content: { mediaUrl, caption, message }
     };
 
   } catch (error) {
-    console.error(`❌ Failed to send message to ${mobile}:`, error.message);
+    console.error(`❌ Failed to send combined message to ${mobile}:`, error.message);
+
+    // Take debug screenshot
+    try {
+      await globalPage.screenshot({
+        path: `debug-combined-send-fail-${Date.now()}.png`,
+        fullPage: true
+      });
+    } catch (e) {
+      console.log('Could not take debug screenshot');
+    }
+
     return { success: false, mobile, error: error.message };
   }
 }
@@ -999,19 +1074,28 @@ app.post('/send-messages', async (req, res) => {
     const results = [];
 
     for (const item of whatsapp) {
-      const { id, mobile, message = '', filePath = '', caption = '', mediaType = 'auto' } = item;
+      const { id, mobile, message = '', filePath = '', link = '', caption = '', mediaType = 'auto' } = item;
 
-      if (!mobile || (!message && !filePath)) {
+      // Use link if filePath is not provided (your payload format)
+      const mediaUrl = filePath || link;
+
+      if (!mobile || (!message && !mediaUrl)) {
         results.push({
           id,
           success: false,
           mobile,
-          error: 'Mobile number and either message or filePath are required'
+          error: 'Mobile number and either message or media (filePath/link) are required'
         });
         continue;
       }
 
-      const result = await sendMessage(mobile, message, filePath, caption, mediaType);
+      console.log(`📤 Processing message for ${mobile}:`, {
+        hasMessage: !!message,
+        hasMedia: !!mediaUrl,
+        caption: caption || 'none'
+      });
+
+      const result = await sendCombinedMessage(mobile, message, mediaUrl, caption);
       results.push({
         id,
         ...result
