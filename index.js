@@ -591,15 +591,17 @@ async function navigateToChat(mobile) {
 
     // Format phone number (remove + if present)
     const cleanNumber = mobile.replace(/^\+/, '');
-    const waUrl = `https://api.whatsapp.com/send?phone=${cleanNumber}`;
+    const waUrl = `https://web.whatsapp.com/send?phone=${cleanNumber}`;
 
-    console.log(`🔗 Using WhatsApp API URL: ${waUrl}`);
+    console.log(`🔗 Using WhatsApp Web URL: ${waUrl}`);
 
-    // Navigate directly to the chat using wa.me URL
-    await globalPage.goto(waUrl, {
-      waitUntil: 'networkidle',
-      timeout: 30000
-    });
+    // Navigate within the same session using JavaScript
+    await globalPage.evaluate((url) => {
+      window.location.href = url;
+    }, waUrl);
+
+    // Wait for navigation to complete
+    await globalPage.waitForLoadState('networkidle', { timeout: 30000 });
 
     // Wait for page to load and handle any dialogs
     await globalPage.waitForTimeout(3000);
