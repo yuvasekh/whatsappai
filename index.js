@@ -894,11 +894,24 @@ async function sendTextMessage(mobile, message) {
   }
 }
 
-// Send message function (unchanged from your original)
-async function sendMessage(mobile, message = '', filePath = '', caption = '', mediaType = 'auto') {
+// Enhanced send message function with media support
+async function sendMessageWithMedia(mobile, message = '', mediaUrl = '', caption = '', mediaType = 'auto') {
   try {
     const results = [];
 
+    // Send image from URL if provided
+    if (mediaUrl) {
+      console.log(`📷 Sending image from URL: ${mediaUrl}`);
+      const imageResult = await sendImageFromUrl(mobile, mediaUrl, caption);
+      results.push(imageResult);
+
+      // Add delay between media and text message
+      if (message) {
+        await globalPage.waitForTimeout(2000);
+      }
+    }
+
+    // Send text message if provided
     if (message) {
       const textResult = await sendTextMessage(mobile, message);
       results.push(textResult);
@@ -917,6 +930,116 @@ async function sendMessage(mobile, message = '', filePath = '', caption = '', me
 
   } catch (error) {
     console.error(`❌ Failed to send message to ${mobile}:`, error.message);
+    return { success: false, mobile, error: error.message };
+  }
+}
+
+// Send image from URL
+async function sendImageFromUrl(mobile, imageUrl, caption = '') {
+  try {
+    console.log(`📷 Sending image to ${mobile} from URL: ${imageUrl}`);
+
+    await navigateToChat(mobile);
+    await handleDialogs();
+
+    // Find attachment button
+    const attachmentSelectors = [
+      '[data-testid="clip"]',
+      '[data-testid="attach-menu-plus"]',
+      'span[data-testid="clip"]',
+      'button[aria-label*="Attach"]',
+      '[title*="Attach"]'
+    ];
+
+    let attachButton = null;
+    for (const selector of attachmentSelectors) {
+      try {
+        attachButton = await globalPage.waitForSelector(selector, { timeout: 5000 });
+        if (attachButton && await attachButton.isVisible()) {
+          console.log(`✅ Found attachment button: ${selector}`);
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    if (!attachButton) {
+      throw new Error('Attachment button not found');
+    }
+
+    // Click attachment button
+    await attachButton.click();
+    await globalPage.waitForTimeout(1000);
+
+    // For URL images, we need to use a different approach
+    // Copy image URL to clipboard and paste it
+    await globalPage.evaluate((url) => {
+      navigator.clipboard.writeText(url);
+    }, imageUrl);
+
+    // Find message input and paste the URL
+    const messageSelectors = [
+      '[data-testid="conversation-compose-box-input"]',
+      'div[contenteditable="true"][data-tab="10"]',
+      '[role="textbox"][data-tab="10"]'
+    ];
+
+    let messageBox = null;
+    for (const selector of messageSelectors) {
+      try {
+        messageBox = await globalPage.$(selector);
+        if (messageBox && await messageBox.isVisible()) {
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    if (!messageBox) {
+      throw new Error('Message input box not found');
+    }
+
+    // Type the image URL directly
+    await messageBox.click();
+    await globalPage.waitForTimeout(500);
+
+    // Clear any existing content
+    await messageBox.selectText();
+    await globalPage.keyboard.press('Delete');
+    await globalPage.waitForTimeout(500);
+
+    // Type the image URL
+    await messageBox.type(imageUrl, { delay: 50 });
+    await globalPage.waitForTimeout(1000);
+
+    // Add caption if provided
+    if (caption) {
+      await messageBox.type(`\n${caption}`, { delay: 50 });
+      await globalPage.waitForTimeout(1000);
+    }
+
+    // Send the message
+    await globalPage.keyboard.press('Enter');
+    await globalPage.waitForTimeout(3000);
+
+    console.log(`✅ Image URL sent to ${mobile}`);
+    return { success: true, mobile, message: 'Image URL sent successfully' };
+
+  } catch (error) {
+    console.error(`❌ Failed to send image to ${mobile}:`, error.message);
+
+    // Take debug screenshot
+    try {
+      await globalPage.screenshot({
+        path: `debug-image-send-fail-${Date.now()}.png`,
+        fullPage: true
+      });
+    } catch (e) {
+      console.log('Could not take debug screenshot');
+    }
+
     return { success: false, mobile, error: error.message };
   }
 }
@@ -1504,19 +1627,28 @@ app.post('/send-messages', async (req, res) => {
     const results = [];
 
     for (const item of whatsapp) {
-      const { id, mobile, message = '', filePath = '', caption = '', mediaType = 'auto' } = item;
+      const { id, mobile, message = '', filePath = '', link = '', caption = '', mediaType = 'auto' } = item;
 
-      if (!mobile || (!message && !filePath)) {
+      // Use link if filePath is not provided
+      const mediaUrl = filePath || link;
+
+      if (!mobile || (!message && !mediaUrl)) {
         results.push({
           id,
           success: false,
           mobile,
-          error: 'Mobile number and either message or filePath are required'
+          error: 'Mobile number and either message or media (filePath/link) are required'
         });
         continue;
       }
 
-      const result = await sendMessage(mobile, message, filePath, caption, mediaType);
+      console.log(`📤 Processing message for ${mobile}:`, {
+        hasMessage: !!message,
+        hasMedia: !!mediaUrl,
+        caption: caption || 'none'
+      });
+
+      const result = await sendMessageWithMedia(mobile, message, mediaUrl, caption, mediaType);
       results.push({
         id,
         ...result
