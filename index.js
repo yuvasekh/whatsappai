@@ -1145,6 +1145,27 @@ app.get('/debug-screenshot', (req, res) => {
   res.sendFile(screenshotPath);
 });
 
+// Serve debug files from server directory
+app.get('/debug-files/:filename', (req, res) => {
+  try {
+    const filename = req.params.filename;
+    const filePath = path.join(__dirname, filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    // Security check - only allow image files
+    if (!filename.match(/\.(png|jpg|jpeg)$/i)) {
+      return res.status(400).json({ error: 'Invalid file type' });
+    }
+
+    res.sendFile(filePath);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get WhatsApp list
 app.get('/get-whatsapp-list', async (req, res) => {
   const { userid, secret, method = 'list_whatsapp_l' } = req.query;
