@@ -917,6 +917,119 @@ async function sendMessage(mobile, message = '', filePath = '', caption = '', me
 
   } catch (error) {
     console.error(`❌ Failed to send message to ${mobile}:`, error.message);
+<<<<<<< HEAD
+=======
+    return { success: false, mobile, error: error.message };
+  }
+}
+
+// Send image from URL
+async function sendImageFromUrl(mobile, imageUrl, caption = '') {
+  try {
+    console.log(`📷 Sending image to ${mobile} from URL: ${imageUrl}`);
+
+    await navigateToChat(mobile);
+    await handleDialogs();
+
+    // Find attachment button
+    const attachmentSelectors = [
+      '[data-testid="clip"]',
+      '[data-testid="attach-menu-plus"]',
+      'span[data-testid="clip"]',
+      'button[aria-label*="Attach"]',
+      '[title*="Attach"]'
+    ];
+
+    let attachButton = null;
+    for (const selector of attachmentSelectors) {
+      try {
+        attachButton = await globalPage.waitForSelector(selector, { timeout: 5000 });
+        if (attachButton && await attachButton.isVisible()) {
+          console.log(`✅ Found attachment button: ${selector}`);
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    if (!attachButton) {
+      throw new Error('Attachment button not found');
+    }
+
+    // Click attachment button
+    await attachButton.click();
+    await globalPage.waitForTimeout(1000);
+
+    // For URL images, we need to use a different approach
+    // Copy image URL to clipboard and paste it
+    await globalPage.evaluate((url) => {
+      navigator.clipboard.writeText(url);
+    }, imageUrl);
+
+    // Find message input and paste the URL
+    const messageSelectors = [
+      '[data-testid="conversation-compose-box-input"]',
+      'div[contenteditable="true"][data-tab="10"]',
+      '[role="textbox"][data-tab="10"]'
+    ];
+
+    let messageBox = null;
+    for (const selector of messageSelectors) {
+      try {
+        messageBox = await globalPage.$(selector);
+        if (messageBox && await messageBox.isVisible()) {
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    if (!messageBox) {
+      throw new Error('Message input box not found');
+    }
+
+    // Type the image URL directly
+    await messageBox.click();
+    await globalPage.waitForTimeout(500);
+
+    // Clear any existing content
+    await messageBox.selectText();
+    await globalPage.keyboard.press('Delete');
+    await globalPage.waitForTimeout(500);
+
+    // Type the image URL
+    await messageBox.type(imageUrl, { delay: 50 });
+    await globalPage.waitForTimeout(1000);
+
+    // Add caption if provided
+    if (caption) {
+      await messageBox.type(`\n${caption}`, { delay: 50 });
+      await globalPage.waitForTimeout(1000);
+    }
+
+    // Send the message
+    await globalPage.keyboard.press('Enter');
+    await globalPage.waitForTimeout(3000);
+
+    console.log(`✅ Image URL sent to ${mobile}`);
+    return { success: true, mobile, message: 'Image URL sent successfully' };
+
+  } catch (error) {
+    console.error(`❌ Failed to send image to ${mobile}:`, error.message);
+
+    // Take debug screenshot
+    try {
+      await globalPage.screenshot({
+        path: `debug-image-send-fail-${Date.now()}.png`,
+        fullPage: true
+      });
+    } catch (e) {
+      console.log('Could not take debug screenshot');
+    }
+
+>>>>>>> 408ae62ab71b3ede00225b722f737012f36bca22
     return { success: false, mobile, error: error.message };
   }
 }
