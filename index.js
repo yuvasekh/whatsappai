@@ -773,7 +773,20 @@ async function sendTextMessage(mobile, message) {
 
     // Type message with delay for reliability
     await messageBox.type(message, { delay: 50 });
-    await globalPage.waitForTimeout(1000);
+    await globalPage.waitForTimeout(2000); // Longer wait after typing
+
+    // Ensure message is fully typed before sending
+    const typedContent = await messageBox.evaluate(el => el.textContent || el.innerText || '');
+    console.log(`📝 Typed content: "${typedContent.trim()}"`);
+
+    if (!typedContent.trim().includes(message.trim())) {
+      console.log('⚠️ Message not fully typed, retrying...');
+      await messageBox.selectText();
+      await globalPage.keyboard.press('Delete');
+      await globalPage.waitForTimeout(500);
+      await messageBox.type(message, { delay: 100 });
+      await globalPage.waitForTimeout(1000);
+    }
 
     // Send message with multiple attempts
     let messageSent = false;
@@ -785,16 +798,50 @@ async function sendTextMessage(mobile, message) {
 
     for (const attempt of sendAttempts) {
       try {
+        console.log('📤 Attempting to send message...');
         await attempt();
-        await globalPage.waitForTimeout(2000);
+        await globalPage.waitForTimeout(3000); // Longer wait to see if message appears
 
-        // Verify message was sent by checking if input is cleared
-        const inputValue = await messageBox.evaluate(el => el.textContent || el.value || '');
-        if (!inputValue.trim()) {
+        // Better verification: check for sent message indicators
+        const verificationChecks = [
+          // Check if input is cleared
+          async () => {
+            const inputValue = await messageBox.evaluate(el => el.textContent || el.value || '');
+            return !inputValue.trim();
+          },
+          // Check for message bubbles
+          async () => {
+            const messageBubbles = await globalPage.$$('[data-testid="msg-container"]');
+            return messageBubbles.length > 0;
+          },
+          // Check for sent indicators
+          async () => {
+            const sentIndicators = await globalPage.$$('[data-testid="msg-check"], [data-icon="msg-check"]');
+            return sentIndicators.length > 0;
+          }
+        ];
+
+        let verified = false;
+        for (const check of verificationChecks) {
+          try {
+            if (await check()) {
+              verified = true;
+              break;
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+
+        if (verified) {
           messageSent = true;
+          console.log('✅ Message send verified');
           break;
+        } else {
+          console.log('⚠️ Message send not verified, trying next method...');
         }
       } catch (e) {
+        console.log('❌ Send attempt failed:', e.message);
         continue;
       }
     }
