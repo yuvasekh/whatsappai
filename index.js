@@ -271,6 +271,39 @@ async function checkLoginStatus() {
     const env = detectEnvironment();
     const timeout = env.isCloud ? 20000 : 10000;
 
+    // First check for loading states that need to be handled
+    const loadingSelectors = [
+      'div:has-text("Loading chats")',
+      'div:has-text("Loading...")',
+      '[data-testid="startup-progress"]',
+      '.progress-container',
+      '.loading-screen'
+    ];
+
+    // Check if stuck in loading state
+    for (const selector of loadingSelectors) {
+      try {
+        const loadingElement = await globalPage.$(selector);
+        if (loadingElement && await loadingElement.isVisible()) {
+          console.log(`⏳ Found loading state: ${selector}`);
+
+          // Wait for loading to complete or timeout
+          await globalPage.waitForTimeout(10000);
+
+          // Try to force refresh if still loading
+          const stillLoading = await globalPage.$(selector);
+          if (stillLoading && await stillLoading.isVisible()) {
+            console.log('🔄 Still loading, attempting to refresh...');
+            await globalPage.reload({ waitUntil: 'networkidle' });
+            await globalPage.waitForTimeout(5000);
+          }
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
     const loginSelectors = [
       '[data-testid="chat-list"]',
       '[data-testid="chat-list-search"]',
@@ -1564,6 +1597,111 @@ app.get('/debug-send-messages', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Debug screenshot failed:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Force complete loading state
+app.post('/force-complete-loading', async (req, res) => {
+  try {
+    if (!globalPage || !globalBrowser) {
+      return res.status(400).json({
+        success: false,
+        message: 'WhatsApp session not initialized'
+      });
+    }
+
+    console.log('🔄 Forcing completion of loading state...');
+
+    // Take screenshot before action
+    await globalPage.screenshot({
+      path: `before-force-loading-${Date.now()}.png`,
+      fullPage: true
+    });
+
+    // Check current state
+    const pageAnalysis = await globalPage.evaluate(() => {
+      const bodyText = document.body.innerText;
+      return {
+        url: window.location.href,
+        title: document.title,
+        hasLoadingText: bodyText.includes('Loading chats') || bodyText.includes('Loading...'),
+        bodyText: bodyText.substring(0, 500)
+      };
+    });
+
+    console.log('📊 Current page state:', pageAnalysis);
+
+    // Try multiple approaches to complete loading
+    const completionMethods = [
+      // Method 1: Refresh the page
+      async () => {
+        console.log('🔄 Method 1: Refreshing page...');
+        await globalPage.reload({ waitUntil: 'networkidle' });
+        await globalPage.waitForTimeout(5000);
+      },
+
+      // Method 2: Navigate to WhatsApp Web again
+      async () => {
+        console.log('🔄 Method 2: Re-navigating to WhatsApp Web...');
+        await globalPage.goto('https://web.whatsapp.com/', { waitUntil: 'networkidle' });
+        await globalPage.waitForTimeout(5000);
+      },
+
+      // Method 3: Try keyboard shortcuts
+      async () => {
+        console.log('🔄 Method 3: Trying keyboard shortcuts...');
+        await globalPage.keyboard.press('F5'); // Refresh
+        await globalPage.waitForTimeout(3000);
+        await globalPage.keyboard.press('Escape'); // Close any dialogs
+        await globalPage.waitForTimeout(2000);
+      }
+    ];
+
+    let success = false;
+    for (const method of completionMethods) {
+      try {
+        await method();
+
+        // Check if loading completed
+        const loginResult = await checkLoginStatus();
+        if (loginResult.loggedIn) {
+          success = true;
+          console.log('✅ Loading completed successfully!');
+          break;
+        }
+      } catch (e) {
+        console.log('⚠️ Method failed:', e.message);
+        continue;
+      }
+    }
+
+    // Take screenshot after action
+    await globalPage.screenshot({
+      path: `after-force-loading-${Date.now()}.png`,
+      fullPage: true
+    });
+
+    if (success) {
+      isLoggedIn = true;
+      res.json({
+        success: true,
+        message: 'Loading state completed successfully',
+        loggedIn: true
+      });
+    } else {
+      res.json({
+        success: false,
+        message: 'Could not complete loading state',
+        pageAnalysis
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Force loading completion failed:', error.message);
     res.status(500).json({
       success: false,
       error: error.message
