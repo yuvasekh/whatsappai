@@ -19,14 +19,8 @@ let globalPage = null;
 let isLoggedIn = false;
 let isWhatsAppReady = false;
 
-// Cached environment detection (avoid repeated calls)
-let cachedEnvironment = null;
-
+// Enhanced environment detection
 function detectEnvironment() {
-  if (cachedEnvironment) {
-    return cachedEnvironment;
-  }
-
   const indicators = {
     render: !!(process.env.RENDER || process.env.RENDER_SERVICE_ID),
     railway: !!process.env.RAILWAY_ENVIRONMENT,
@@ -38,11 +32,8 @@ function detectEnvironment() {
 
   const isCloud = Object.values(indicators).some(Boolean);
 
-  cachedEnvironment = { isCloud, ...indicators };
-
-  // Only log once during startup
-  console.log('🔧 Environment:', isCloud ? 'Cloud' : 'Local');
-  return cachedEnvironment;
+  console.log('🔧 Environment Detection:', indicators);
+  return { isCloud, ...indicators };
 }
 
 // Initialize WhatsApp Web session
@@ -194,7 +185,6 @@ async function initializeWhatsApp() {
 
     if (loginResult.loggedIn) {
       isLoggedIn = true;
-      isWhatsAppReady = true; // Set ready flag when already logged in
       console.log('✅ User is already logged in');
       return { loggedIn: true };
     }
@@ -275,12 +265,11 @@ async function handleCompatibilityWarnings() {
 // Enhanced login status check
 async function checkLoginStatus() {
   try {
-    // Reduce logging frequency - only log if not already logged in
-    if (!isLoggedIn) {
-      console.log('🔍 Checking login status...');
-    }
+    console.log('🔍 Checking login status...');
 
+    // Wait longer in cloud environments
     const env = detectEnvironment();
+    const timeout = env.isCloud ? 20000 : 10000;
 
     // First check for loading states that need to be handled
     const loadingSelectors = [
@@ -333,10 +322,7 @@ async function checkLoginStatus() {
         });
 
         if (element && await element.isVisible()) {
-          // Only log once when first detected
-          if (!isLoggedIn) {
-            console.log(`✅ Login detected with: ${selector}`);
-          }
+          console.log(`✅ Login detected with: ${selector}`);
           return { loggedIn: true };
         }
       } catch (e) {
@@ -497,7 +483,6 @@ async function monitorQRScanCompletion() {
         if (loginResult.loggedIn) {
           console.log('✅ QR scan completed! User is now logged in');
           isLoggedIn = true;
-          isWhatsAppReady = true; // Set ready flag
           clearInterval(checkInterval);
 
           // Take final screenshot
@@ -909,234 +894,29 @@ async function sendTextMessage(mobile, message) {
   }
 }
 
-// Enhanced send message function with media support (sends all together)
-async function sendMessageWithMedia(mobile, message = '', mediaUrl = '', caption = '', mediaType = 'auto') {
+// Send message function (unchanged from your original)
+async function sendMessage(mobile, message = '', filePath = '', caption = '', mediaType = 'auto') {
   try {
-    console.log(`📤 Sending combined message to ${mobile}:`, {
-      hasMessage: !!message,
-      hasMedia: !!mediaUrl,
-      hasCaption: !!caption
-    });
+    const results = [];
 
-    // Navigate to chat once
-    await navigateToChat(mobile);
-    await handleDialogs();
-
-    // If we have both image and text/caption, send them together
-    if (mediaUrl && (message || caption)) {
-      return await sendImageWithTextTogether(mobile, mediaUrl, message, caption);
-    }
-
-    // If only image with caption
-    if (mediaUrl) {
-      return await sendImageFromUrl(mobile, mediaUrl, caption);
-    }
-
-    // If only text message
     if (message) {
-      return await sendTextMessage(mobile, message);
+      const textResult = await sendTextMessage(mobile, message);
+      results.push(textResult);
     }
 
-    return { success: false, mobile, error: 'No content to send' };
+    const allSuccessful = results.every(r => r.success);
+    const combinedMessage = results.map(r => r.message).join('; ');
+    const combinedError = results.filter(r => !r.success).map(r => r.error).join('; ');
 
-  } catch (error) {
-    console.error(`❌ Failed to send message to ${mobile}:`, error.message);
-    return { success: false, mobile, error: error.message };
-  }
-}
-
-// Send image with text together in one message
-async function sendImageWithTextTogether(mobile, imageUrl, message = '', caption = '') {
-  try {
-    console.log(`📷📝 Sending image + text together to ${mobile}`);
-
-    // Find message input box
-    const messageSelectors = [
-      '[data-testid="conversation-compose-box-input"]',
-      'div[contenteditable="true"][data-tab="10"]',
-      '[role="textbox"][data-tab="10"]'
-    ];
-
-    let messageBox = null;
-    for (const selector of messageSelectors) {
-      try {
-        messageBox = await globalPage.$(selector);
-        if (messageBox && await messageBox.isVisible()) {
-          break;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-
-    if (!messageBox) {
-      throw new Error('Message input box not found');
-    }
-
-    // Click and clear message box
-    await messageBox.click();
-    await globalPage.waitForTimeout(500);
-    await messageBox.selectText();
-    await globalPage.keyboard.press('Delete');
-    await globalPage.waitForTimeout(500);
-
-    // Combine all content into one message
-    let combinedContent = '';
-
-    // Add image URL
-    if (imageUrl) {
-      combinedContent += imageUrl;
-    }
-
-    // Add caption if provided
-    if (caption) {
-      combinedContent += combinedContent ? `\n${caption}` : caption;
-    }
-
-    // Add message if provided
-    if (message) {
-      combinedContent += combinedContent ? `\n${message}` : message;
-    }
-
-    // Type the combined content
-    await messageBox.type(combinedContent, { delay: 50 });
-    await globalPage.waitForTimeout(2000);
-
-    // Send the message
-    await globalPage.keyboard.press('Enter');
-    await globalPage.waitForTimeout(3000);
-
-    console.log(`✅ Combined message sent to ${mobile}`);
     return {
-      success: true,
+      success: allSuccessful,
       mobile,
-      message: 'Image + text sent together successfully',
-      content: { imageUrl, caption, message }
+      message: allSuccessful ? combinedMessage : combinedError,
+      details: results
     };
 
   } catch (error) {
-    console.error(`❌ Failed to send combined message to ${mobile}:`, error.message);
-
-    // Take debug screenshot
-    try {
-      await globalPage.screenshot({
-        path: `debug-combined-send-fail-${Date.now()}.png`,
-        fullPage: true
-      });
-    } catch (e) {
-      console.log('Could not take debug screenshot');
-    }
-
-    return { success: false, mobile, error: error.message };
-  }
-}
-
-// Send image from URL
-async function sendImageFromUrl(mobile, imageUrl, caption = '') {
-  try {
-    console.log(`📷 Sending image to ${mobile} from URL: ${imageUrl}`);
-
-    await navigateToChat(mobile);
-    await handleDialogs();
-
-    // Find attachment button
-    const attachmentSelectors = [
-      '[data-testid="clip"]',
-      '[data-testid="attach-menu-plus"]',
-      'span[data-testid="clip"]',
-      'button[aria-label*="Attach"]',
-      '[title*="Attach"]'
-    ];
-
-    let attachButton = null;
-    for (const selector of attachmentSelectors) {
-      try {
-        attachButton = await globalPage.waitForSelector(selector, { timeout: 5000 });
-        if (attachButton && await attachButton.isVisible()) {
-          console.log(`✅ Found attachment button: ${selector}`);
-          break;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-
-    if (!attachButton) {
-      throw new Error('Attachment button not found');
-    }
-
-    // Click attachment button
-    await attachButton.click();
-    await globalPage.waitForTimeout(1000);
-
-    // For URL images, we need to use a different approach
-    // Copy image URL to clipboard and paste it
-    await globalPage.evaluate((url) => {
-      navigator.clipboard.writeText(url);
-    }, imageUrl);
-
-    // Find message input and paste the URL
-    const messageSelectors = [
-      '[data-testid="conversation-compose-box-input"]',
-      'div[contenteditable="true"][data-tab="10"]',
-      '[role="textbox"][data-tab="10"]'
-    ];
-
-    let messageBox = null;
-    for (const selector of messageSelectors) {
-      try {
-        messageBox = await globalPage.$(selector);
-        if (messageBox && await messageBox.isVisible()) {
-          break;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-
-    if (!messageBox) {
-      throw new Error('Message input box not found');
-    }
-
-    // Type the image URL directly
-    await messageBox.click();
-    await globalPage.waitForTimeout(500);
-
-    // Clear any existing content
-    await messageBox.selectText();
-    await globalPage.keyboard.press('Delete');
-    await globalPage.waitForTimeout(500);
-
-    // Type the image URL
-    await messageBox.type(imageUrl, { delay: 50 });
-    await globalPage.waitForTimeout(1000);
-
-    // Add caption if provided
-    if (caption) {
-      await messageBox.type(`\n${caption}`, { delay: 50 });
-      await globalPage.waitForTimeout(1000);
-    }
-
-    // Send the message
-    await globalPage.keyboard.press('Enter');
-    await globalPage.waitForTimeout(3000);
-
-    console.log(`✅ Image URL sent to ${mobile}`);
-    return { success: true, mobile, message: 'Image URL sent successfully' };
-
-  } catch (error) {
-    console.error(`❌ Failed to send image to ${mobile}:`, error.message);
-
-    // Take debug screenshot
-    try {
-      await globalPage.screenshot({
-        path: `debug-image-send-fail-${Date.now()}.png`,
-        fullPage: true
-      });
-    } catch (e) {
-      console.log('Could not take debug screenshot');
-    }
-
+    console.error(`❌ Failed to send message to ${mobile}:`, error.message);
     return { success: false, mobile, error: error.message };
   }
 }
@@ -1724,28 +1504,19 @@ app.post('/send-messages', async (req, res) => {
     const results = [];
 
     for (const item of whatsapp) {
-      const { id, mobile, message = '', filePath = '', link = '', caption = '', mediaType = 'auto' } = item;
+      const { id, mobile, message = '', filePath = '', caption = '', mediaType = 'auto' } = item;
 
-      // Use link if filePath is not provided
-      const mediaUrl = filePath || link;
-
-      if (!mobile || (!message && !mediaUrl)) {
+      if (!mobile || (!message && !filePath)) {
         results.push({
           id,
           success: false,
           mobile,
-          error: 'Mobile number and either message or media (filePath/link) are required'
+          error: 'Mobile number and either message or filePath are required'
         });
         continue;
       }
 
-      console.log(`📤 Processing message for ${mobile}:`, {
-        hasMessage: !!message,
-        hasMedia: !!mediaUrl,
-        caption: caption || 'none'
-      });
-
-      const result = await sendMessageWithMedia(mobile, message, mediaUrl, caption, mediaType);
+      const result = await sendMessage(mobile, message, filePath, caption, mediaType);
       results.push({
         id,
         ...result
