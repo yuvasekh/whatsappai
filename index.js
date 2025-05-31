@@ -86,7 +86,7 @@ async function initializeWhatsApp() {
 
     // Enhanced launch options for cloud environments
     const launchOptions = {
-      headless: false,
+      headless: true,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
