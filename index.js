@@ -19,8 +19,14 @@ let globalPage = null;
 let isLoggedIn = false;
 let isWhatsAppReady = false;
 
-// Enhanced environment detection
+// Cached environment detection (avoid repeated calls)
+let cachedEnvironment = null;
+
 function detectEnvironment() {
+  if (cachedEnvironment) {
+    return cachedEnvironment;
+  }
+
   const indicators = {
     render: !!(process.env.RENDER || process.env.RENDER_SERVICE_ID),
     railway: !!process.env.RAILWAY_ENVIRONMENT,
@@ -32,8 +38,11 @@ function detectEnvironment() {
 
   const isCloud = Object.values(indicators).some(Boolean);
 
-  console.log('🔧 Environment Detection:', indicators);
-  return { isCloud, ...indicators };
+  cachedEnvironment = { isCloud, ...indicators };
+
+  // Only log once during startup
+  console.log('🔧 Environment:', isCloud ? 'Cloud' : 'Local');
+  return cachedEnvironment;
 }
 
 // Initialize WhatsApp Web session
@@ -265,11 +274,12 @@ async function handleCompatibilityWarnings() {
 // Enhanced login status check
 async function checkLoginStatus() {
   try {
-    console.log('🔍 Checking login status...');
+    // Reduce logging frequency - only log if not already logged in
+    if (!isLoggedIn) {
+      console.log('🔍 Checking login status...');
+    }
 
-    // Wait longer in cloud environments
     const env = detectEnvironment();
-    const timeout = env.isCloud ? 20000 : 10000;
 
     // First check for loading states that need to be handled
     const loadingSelectors = [
@@ -322,7 +332,10 @@ async function checkLoginStatus() {
         });
 
         if (element && await element.isVisible()) {
-          console.log(`✅ Login detected with: ${selector}`);
+          // Only log once when first detected
+          if (!isLoggedIn) {
+            console.log(`✅ Login detected with: ${selector}`);
+          }
           return { loggedIn: true };
         }
       } catch (e) {
@@ -483,6 +496,7 @@ async function monitorQRScanCompletion() {
         if (loginResult.loggedIn) {
           console.log('✅ QR scan completed! User is now logged in');
           isLoggedIn = true;
+          isWhatsAppReady = true; // Set ready flag
           clearInterval(checkInterval);
 
           // Take final screenshot
