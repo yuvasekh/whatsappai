@@ -194,6 +194,7 @@ async function initializeWhatsApp() {
 
     if (loginResult.loggedIn) {
       isLoggedIn = true;
+      isWhatsAppReady = true; // Set ready flag when already logged in
       console.log('✅ User is already logged in');
       return { loggedIn: true };
     }
@@ -908,42 +909,124 @@ async function sendTextMessage(mobile, message) {
   }
 }
 
-// Enhanced send message function with media support
+// Enhanced send message function with media support (sends all together)
 async function sendMessageWithMedia(mobile, message = '', mediaUrl = '', caption = '', mediaType = 'auto') {
   try {
-    const results = [];
+    console.log(`📤 Sending combined message to ${mobile}:`, {
+      hasMessage: !!message,
+      hasMedia: !!mediaUrl,
+      hasCaption: !!caption
+    });
 
-    // Send image from URL if provided
+    // Navigate to chat once
+    await navigateToChat(mobile);
+    await handleDialogs();
+
+    // If we have both image and text/caption, send them together
+    if (mediaUrl && (message || caption)) {
+      return await sendImageWithTextTogether(mobile, mediaUrl, message, caption);
+    }
+
+    // If only image with caption
     if (mediaUrl) {
-      console.log(`📷 Sending image from URL: ${mediaUrl}`);
-      const imageResult = await sendImageFromUrl(mobile, mediaUrl, caption);
-      results.push(imageResult);
-
-      // Add delay between media and text message
-      if (message) {
-        await globalPage.waitForTimeout(2000);
-      }
+      return await sendImageFromUrl(mobile, mediaUrl, caption);
     }
 
-    // Send text message if provided
+    // If only text message
     if (message) {
-      const textResult = await sendTextMessage(mobile, message);
-      results.push(textResult);
+      return await sendTextMessage(mobile, message);
     }
 
-    const allSuccessful = results.every(r => r.success);
-    const combinedMessage = results.map(r => r.message).join('; ');
-    const combinedError = results.filter(r => !r.success).map(r => r.error).join('; ');
-
-    return {
-      success: allSuccessful,
-      mobile,
-      message: allSuccessful ? combinedMessage : combinedError,
-      details: results
-    };
+    return { success: false, mobile, error: 'No content to send' };
 
   } catch (error) {
     console.error(`❌ Failed to send message to ${mobile}:`, error.message);
+    return { success: false, mobile, error: error.message };
+  }
+}
+
+// Send image with text together in one message
+async function sendImageWithTextTogether(mobile, imageUrl, message = '', caption = '') {
+  try {
+    console.log(`📷📝 Sending image + text together to ${mobile}`);
+
+    // Find message input box
+    const messageSelectors = [
+      '[data-testid="conversation-compose-box-input"]',
+      'div[contenteditable="true"][data-tab="10"]',
+      '[role="textbox"][data-tab="10"]'
+    ];
+
+    let messageBox = null;
+    for (const selector of messageSelectors) {
+      try {
+        messageBox = await globalPage.$(selector);
+        if (messageBox && await messageBox.isVisible()) {
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    if (!messageBox) {
+      throw new Error('Message input box not found');
+    }
+
+    // Click and clear message box
+    await messageBox.click();
+    await globalPage.waitForTimeout(500);
+    await messageBox.selectText();
+    await globalPage.keyboard.press('Delete');
+    await globalPage.waitForTimeout(500);
+
+    // Combine all content into one message
+    let combinedContent = '';
+
+    // Add image URL
+    if (imageUrl) {
+      combinedContent += imageUrl;
+    }
+
+    // Add caption if provided
+    if (caption) {
+      combinedContent += combinedContent ? `\n${caption}` : caption;
+    }
+
+    // Add message if provided
+    if (message) {
+      combinedContent += combinedContent ? `\n${message}` : message;
+    }
+
+    // Type the combined content
+    await messageBox.type(combinedContent, { delay: 50 });
+    await globalPage.waitForTimeout(2000);
+
+    // Send the message
+    await globalPage.keyboard.press('Enter');
+    await globalPage.waitForTimeout(3000);
+
+    console.log(`✅ Combined message sent to ${mobile}`);
+    return {
+      success: true,
+      mobile,
+      message: 'Image + text sent together successfully',
+      content: { imageUrl, caption, message }
+    };
+
+  } catch (error) {
+    console.error(`❌ Failed to send combined message to ${mobile}:`, error.message);
+
+    // Take debug screenshot
+    try {
+      await globalPage.screenshot({
+        path: `debug-combined-send-fail-${Date.now()}.png`,
+        fullPage: true
+      });
+    } catch (e) {
+      console.log('Could not take debug screenshot');
+    }
+
     return { success: false, mobile, error: error.message };
   }
 }
