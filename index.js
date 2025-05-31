@@ -589,11 +589,11 @@ async function navigateToChat(mobile) {
 
     await handleDialogs();
 
-    // Format phone number (remove + if present, wa.me doesn't need it)
+    // Format phone number (remove + if present)
     const cleanNumber = mobile.replace(/^\+/, '');
-    const waUrl = `https://web.whatsapp.com/send?phone=${cleanNumber}`;
+    const waUrl = `https://api.whatsapp.com/send?phone=${cleanNumber}`;
 
-    console.log(`🔗 Using wa.me URL: ${waUrl}`);
+    console.log(`🔗 Using WhatsApp API URL: ${waUrl}`);
 
     // Navigate directly to the chat using wa.me URL
     await globalPage.goto(waUrl, {
