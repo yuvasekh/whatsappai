@@ -669,6 +669,18 @@ async function navigateToChat(mobile) {
     }
 
     console.log(`✅ Successfully navigated to chat: ${mobile}`);
+
+    // Take screenshot after successful navigation
+    try {
+      await globalPage.screenshot({
+        path: `after-navigation-${mobile.replace(/[^\d]/g, '')}-${Date.now()}.png`,
+        fullPage: true
+      });
+      console.log('📸 Screenshot taken after navigation');
+    } catch (e) {
+      console.log('⚠️ Could not take post-navigation screenshot');
+    }
+
     return true;
 
   } catch (error) {
@@ -960,13 +972,46 @@ async function sendCombinedMessage(mobile, message = '', mediaUrl = '', caption 
 
     console.log(`📝 Combined content to send:\n${combinedContent}`);
 
+    // Take screenshot before typing
+    try {
+      await globalPage.screenshot({
+        path: `before-typing-${mobile.replace(/[^\d]/g, '')}-${Date.now()}.png`,
+        fullPage: true
+      });
+      console.log('📸 Screenshot taken before typing');
+    } catch (e) {
+      console.log('⚠️ Could not take pre-typing screenshot');
+    }
+
     // Type the combined content
     await messageBox.type(combinedContent, { delay: 50 });
     await globalPage.waitForTimeout(2000);
 
+    // Take screenshot after typing
+    try {
+      await globalPage.screenshot({
+        path: `after-typing-${mobile.replace(/[^\d]/g, '')}-${Date.now()}.png`,
+        fullPage: true
+      });
+      console.log('📸 Screenshot taken after typing');
+    } catch (e) {
+      console.log('⚠️ Could not take post-typing screenshot');
+    }
+
     // Send the message
     await globalPage.keyboard.press('Enter');
     await globalPage.waitForTimeout(3000);
+
+    // Take screenshot after sending
+    try {
+      await globalPage.screenshot({
+        path: `after-sending-${mobile.replace(/[^\d]/g, '')}-${Date.now()}.png`,
+        fullPage: true
+      });
+      console.log('📸 Screenshot taken after sending');
+    } catch (e) {
+      console.log('⚠️ Could not take post-sending screenshot');
+    }
 
     console.log(`✅ Combined message sent to ${mobile}`);
     return {
