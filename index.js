@@ -86,7 +86,7 @@ async function initializeWhatsApp() {
 
     // Enhanced launch options for cloud environments
     const launchOptions = {
-      headless: true,
+      headless: false,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -574,7 +574,7 @@ async function waitForWhatsAppReady() {
   }
 }
 
-// Enhanced navigate to chat
+// Enhanced navigate to chat using wa.me URL (works for saved and unsaved numbers)
 async function navigateToChat(mobile) {
   try {
     console.log(`📞 Navigating to chat: ${mobile}`);
@@ -589,88 +589,42 @@ async function navigateToChat(mobile) {
 
     await handleDialogs();
 
-    const env = detectEnvironment();
-    const timeout = env.isCloud ? 30000 : 15000;
+    // Format phone number (remove + if present, wa.me doesn't need it)
+    const cleanNumber = mobile.replace(/^\+/, '');
+    const waUrl = `https://web.whatsapp.com/send?phone=${cleanNumber}`;
 
-    // Enhanced search selectors
-    const searchSelectors = [
-      '[data-testid="chat-list-search"]',
-      'div[contenteditable="true"][data-tab="3"]',
-      'div[role="textbox"][data-tab="3"]',
-      '[title="Search or start new chat"]',
-      '[placeholder*="Search"]',
-      'div[contenteditable="true"]'
-    ];
+    console.log(`🔗 Using wa.me URL: ${waUrl}`);
 
-    let searchBox = null;
+    // Navigate directly to the chat using wa.me URL
+    await globalPage.goto(waUrl, {
+      waitUntil: 'networkidle',
+      timeout: 30000
+    });
 
-    for (const selector of searchSelectors) {
-      try {
-        searchBox = await globalPage.waitForSelector(selector, {
-          timeout: 5000,
-          state: 'visible'
-        });
+    // Wait for page to load and handle any dialogs
+    await globalPage.waitForTimeout(3000);
+    await handleDialogs();
 
-        if (searchBox && await searchBox.isVisible()) {
-          console.log(`✅ Found search box: ${selector}`);
-          break;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-
-    if (!searchBox) {
-      await globalPage.screenshot({
-        path: 'debug-no-search.png',
-        fullPage: true
-      });
-      throw new Error('Search box not found');
-    }
-
-    // Enhanced search interaction
-    await searchBox.click();
-    await globalPage.waitForTimeout(1000);
-
-    // Clear and enter phone number (using proper Playwright methods)
-    await searchBox.selectText();
-    await globalPage.keyboard.press('Delete');
-    await globalPage.waitForTimeout(500);
-
-    const formattedMobile = mobile.startsWith('+') ? mobile : `+${mobile}`;
-    console.log(`📱 Searching for: ${formattedMobile}`);
-
-    // Type slowly for better reliability
-    await searchBox.type(formattedMobile, { delay: 100 });
-    await globalPage.waitForTimeout(2000);
-
-    // Press Enter multiple ways
-    try {
-      await globalPage.keyboard.press('Enter');
-    } catch (e) {
-      try {
-        await searchBox.press('Enter');
-      } catch (e2) {
-        console.log('⚠️ Could not press Enter');
-      }
-    }
-
-    // Wait for chat to load
-    await globalPage.waitForTimeout(5000);
-
-    // Verify chat is loaded
+    // Verify we're in a chat interface
     const chatVerificationSelectors = [
       '[data-testid="conversation-compose-box-input"]',
       'div[contenteditable="true"][data-tab="10"]',
-      '[role="textbox"][data-tab="10"]'
+      '[role="textbox"][data-tab="10"]',
+      '[data-testid="msg-container"]',
+      'div[data-testid="conversation-panel-body"]'
     ];
 
-    let chatLoaded = false;
+    let chatInterfaceFound = false;
     for (const selector of chatVerificationSelectors) {
       try {
-        const element = await globalPage.$(selector);
+        const element = await globalPage.waitForSelector(selector, {
+          timeout: 10000,
+          state: 'visible'
+        });
+
         if (element && await element.isVisible()) {
-          chatLoaded = true;
+          console.log(`✅ Chat interface verified with: ${selector}`);
+          chatInterfaceFound = true;
           break;
         }
       } catch (e) {
@@ -678,8 +632,14 @@ async function navigateToChat(mobile) {
       }
     }
 
-    if (!chatLoaded) {
-      throw new Error('Chat did not load properly');
+    if (!chatInterfaceFound) {
+      // Take debug screenshot
+      await globalPage.screenshot({
+        path: `debug-chat-not-found-${Date.now()}.png`,
+        fullPage: true
+      });
+
+      throw new Error('Chat interface not found after navigation');
     }
 
     console.log(`✅ Successfully navigated to chat: ${mobile}`);
@@ -687,6 +647,17 @@ async function navigateToChat(mobile) {
 
   } catch (error) {
     console.error(`❌ Failed to navigate to chat ${mobile}:`, error.message);
+
+    // Take debug screenshot on failure
+    try {
+      await globalPage.screenshot({
+        path: `debug-nav-fail-${mobile}-${Date.now()}.png`,
+        fullPage: true
+      });
+    } catch (e) {
+      console.log('Could not take debug screenshot');
+    }
+
     throw error;
   }
 }
