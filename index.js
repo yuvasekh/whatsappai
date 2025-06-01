@@ -811,6 +811,7 @@ async function monitorQRScanCompletion() {
         if (loginResult.loggedIn) {
           console.log('✅ QR scan completed! User is now logged in');
           isLoggedIn = true;
+          isWhatsAppReady = true; // Set ready flag when login detected
           clearInterval(checkInterval);
 
           const timestamp = Date.now();
@@ -1082,9 +1083,49 @@ async function sendCombinedMessage(mobile, message = '', mediaUrl = '', caption 
 
     console.log(`📝 Combined content to send:\n${combinedContent}`);
 
-    await messageBox.type(combinedContent, { delay: 50 });
+    // Type the combined content using multiple methods for reliability
+    let typingSuccess = false;
+
+    // Method 1: Direct typing with shorter timeout
+    try {
+      await messageBox.type(combinedContent, { delay: 30, timeout: 15000 });
+      typingSuccess = true;
+      console.log('✅ Direct typing successful');
+    } catch (typeError) {
+      console.log('⚠️ Direct typing failed, trying alternative method...');
+
+      // Method 2: Focus and use keyboard
+      try {
+        await messageBox.focus();
+        await globalPage.keyboard.type(combinedContent, { delay: 30 });
+        typingSuccess = true;
+        console.log('✅ Keyboard typing successful');
+      } catch (keyboardError) {
+        console.log('⚠️ Keyboard typing failed, trying clipboard method...');
+
+        // Method 3: Use clipboard
+        try {
+          await globalPage.evaluate((text) => {
+            navigator.clipboard.writeText(text);
+          }, combinedContent);
+
+          await messageBox.focus();
+          await globalPage.keyboard.press('Control+V');
+          typingSuccess = true;
+          console.log('✅ Clipboard typing successful');
+        } catch (clipboardError) {
+          console.log('❌ All typing methods failed');
+        }
+      }
+    }
+
+    if (!typingSuccess) {
+      throw new Error('Failed to type message content');
+    }
+
     await globalPage.waitForTimeout(2000);
 
+    // Send the message
     await globalPage.keyboard.press('Enter');
     await globalPage.waitForTimeout(3000);
 
