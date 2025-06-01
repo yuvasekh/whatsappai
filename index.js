@@ -1315,7 +1315,25 @@ app.get('/api/screenshots', (req, res) => {
     });
   }
 });
+pp.get('/get-whatsapp-list', async (req, res) => {
+  const { userid, secret, method = 'list_whatsapp_l' } = req.query;
+  console.log(req.query);
 
+  if (!userid || !secret) {
+    return res.status(400).json({ success: false, message: 'Missing userid or secret' });
+  }
+
+  try {
+    const response = await axios.get('http://smsguruji.com/wa/api/wa.php', {
+      params: { method, userid, secret }
+    });
+
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error calling smsguruji API:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to fetch WhatsApp list' });
+  }
+});
 app.post('/close', async (req, res) => {
   try {
     if (globalBrowser) {
