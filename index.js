@@ -1315,7 +1315,7 @@ app.get('/api/screenshots', (req, res) => {
     });
   }
 });
-pp.get('/get-whatsapp-list', async (req, res) => {
+app.get('/get-whatsapp-list', async (req, res) => {
   const { userid, secret, method = 'list_whatsapp_l' } = req.query;
   console.log(req.query);
 
