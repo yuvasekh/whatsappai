@@ -733,6 +733,7 @@ async function handleDialogs() {
     console.log('⚠️ Error handling dialogs:', error.message);
   }
 }
+
 // Enhanced send text message
 async function sendTextMessage(mobile, message) {
   try {
@@ -1053,6 +1054,8 @@ async function cleanup() {
     console.log('⚠️ Error during cleanup:', error.message);
   }
 }
+
+// API Routes
 app.post('/initialize', async (req, res) => {
   try {
     if (isLoggedIn && globalBrowser) {
@@ -1079,6 +1082,7 @@ app.post('/initialize', async (req, res) => {
     });
   }
 });
+
 app.post('/send-messages', async (req, res) => {
   try {
     const { whatsapp } = req.body;
@@ -1176,7 +1180,8 @@ app.post('/send-messages', async (req, res) => {
     });
   }
 });
-// Static screenshot file endpoint (for debug files)
+
+// Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
     status: 'OK',
@@ -1185,6 +1190,8 @@ app.get('/health', (req, res) => {
     loggedIn: isLoggedIn
   });
 });
+
+// Debug screenshot endpoint
 app.get('/debug-screenshot', (req, res) => {
   const screenshotPath = path.join(__dirname, 'debug-whatsapp-full.png');
   res.sendFile(screenshotPath);
@@ -1232,7 +1239,6 @@ app.get('/get-whatsapp-list', async (req, res) => {
   }
 });
 
-// Send single message (text only
 // List all debug screenshots and files
 app.get('/api/screenshots', (req, res) => {
   try {
@@ -1297,7 +1303,6 @@ app.get('/api/screenshots', (req, res) => {
     });
   }
 });
-// Send bulk messages (enhanced to support media)
 
 // Close WhatsApp session
 app.post('/close', async (req, res) => {
@@ -1373,23 +1378,21 @@ process.on('SIGTERM', async () => {
   }
   process.exit(0);
 });
-console.log(path.join(__dirname, 'build'));
 
 // Serve static files from the React app
 app.use(express.static(path.join(__dirname, 'build')));
 
 // Handle all routing for React app
-app.get('', (req, res) => {
+app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'build', 'index.html'));
 });
+
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Enhanced WhatsApp API Server running on port ${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/health`);
   console.log(`🔧 Initialize WhatsApp: POST http://localhost:${PORT}/initialize`);
-  console.log(`📤 Send text message: POST http://localhost:${PORT}/send-message`);
-  console.log(`📎 Send media message: POST http://localhost:${PORT}/send-media`);
-  console.log(`📫 Send bulk messages: POST http://localhost:${PORT}/send-messages`);
+  console.log(`📤 Send bulk messages: POST http://localhost:${PORT}/send-messages`);
 });
 
 module.exports = app;
