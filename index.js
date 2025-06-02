@@ -360,11 +360,8 @@ async function initializeWhatsApp() {
     console.log(`⏳ Waiting ${stabilizeTime}ms for page to stabilize...`);
     await globalPage.waitForTimeout(stabilizeTime);
 
-    // Take initial screenshot for debugging
-    await globalPage.screenshot({
-      path: `initial-load-${Date.now()}.png`,
-      fullPage: true
-    });
+    // Skip initial screenshot to avoid timeouts
+    console.log('📸 Skipping initial screenshot to prevent timeout');
 
     // Handle compatibility warnings
     await handleCompatibilityWarnings();
@@ -455,11 +452,8 @@ async function checkForErrorMessages() {
     if (errorMessages.length > 0) {
       console.log('⚠️ Error messages detected:', errorMessages);
       
-      // Take screenshot for debugging
-      await globalPage.screenshot({
-        path: `error-detected-${Date.now()}.png`,
-        fullPage: true
-      });
+      // Skip error screenshot to prevent timeout
+      console.log('📸 Skipping error screenshot to prevent timeout');
       
       // Try to handle the error by refreshing
       console.log('🔄 Attempting to handle error by refreshing...');
@@ -495,11 +489,8 @@ async function handleCompatibilityWarnings() {
       
       console.log('⚠️ Compatibility warning or error detected');
 
-      // Take screenshot for debugging
-      await globalPage.screenshot({
-        path: `compatibility-warning-${Date.now()}.png`,
-        fullPage: true
-      });
+      // Skip compatibility screenshot to prevent timeout
+      console.log('📸 Skipping compatibility screenshot to prevent timeout');
 
       const continueSelectors = [
         'button[data-testid="continue-button"]',
@@ -619,11 +610,8 @@ async function extractQRCode() {
     const waitTime = env.isCloud ? 15000 : 8000;
     await globalPage.waitForTimeout(waitTime);
 
-    // Take screenshot before QR extraction for debugging
-    await globalPage.screenshot({
-      path: `before-qr-extraction-${Date.now()}.png`,
-      fullPage: true
-    });
+    // Skip pre-extraction screenshot to prevent timeout
+    console.log('📸 Skipping pre-extraction screenshot to prevent timeout');
 
     const qrSelectors = [
       'canvas[aria-label*="QR"]',
@@ -705,11 +693,8 @@ async function extractQRCode() {
     }
 
     if (!qrElement) {
-      // Debug screenshot
-      await globalPage.screenshot({
-        path: `debug-no-qr-${Date.now()}.png`,
-        fullPage: true
-      });
+      // Skip debug screenshot to prevent timeout
+      console.log('📸 Skipping debug screenshot to prevent timeout');
 
       // Try to get page content for debugging
       const pageText = await globalPage.evaluate(() => document.body.innerText);
@@ -771,15 +756,8 @@ async function extractQRCode() {
   } catch (error) {
     console.error('❌ QR extraction failed:', error.message);
     
-    // Take error screenshot
-    try {
-      await globalPage.screenshot({
-        path: `qr-extraction-error-${Date.now()}.png`,
-        fullPage: true
-      });
-    } catch (e) {
-      console.log('Could not take error screenshot');
-    }
+    // Skip error screenshot to prevent timeout
+    console.log('📸 Skipping error screenshot to prevent timeout');
 
     return {
       success: false,
@@ -822,11 +800,7 @@ async function monitorQRScanCompletion() {
           isWhatsAppReady = true;
           clearInterval(checkInterval);
 
-          const timestamp = Date.now();
-          await globalPage.screenshot({
-            path: `qr-scan-success-${timestamp}.png`,
-            fullPage: true
-          });
+          console.log('📸 Skipping success screenshot to prevent timeout');
 
           return;
         }
