@@ -853,16 +853,26 @@ app.get('/get-whatsapp-list', async (req, res) => {
 });
 
 
-app.get('/status', (req, res) => {
-  res.json({
-    success: true,
-    status: {
-      browserActive: !!globalBrowser,
-      pageActive: !!globalPage,
+app.get('/status', async (req, res) => {
+  try {
+    const status = {
+      initialized: !!globalBrowser,
       loggedIn: isLoggedIn,
-      timestamp: new Date().toISOString()
-    }
-  });
+      ready: isWhatsAppReady,
+      playwrightInstalled: playwrightInstalled
+    };
+
+    res.json({
+      success: true,
+      status
+    });
+  } catch (error) {
+    console.error('Status endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 app.use((error, req, res, next) => {
