@@ -362,14 +362,10 @@ async function initializeWhatsApp() {
     console.log(`⏳ Waiting ${stabilizeTime}ms for page to stabilize...`);
     await globalPage.waitForTimeout(stabilizeTime);
 
-    // Take initial screenshot for debugging
-    await globalPage.screenshot({
-      path: `initial-load-${Date.now()}.png`,
-      fullPage: true
-    });
+    // Removed initial screenshot for Render optimization
 
     // Handle compatibility warnings
-    await handleCompatibilityWarnings();
+  
 
     // Check for any error messages
     await checkForErrorMessages();
@@ -457,11 +453,7 @@ async function checkForErrorMessages() {
     if (errorMessages.length > 0) {
       console.log('⚠️ Error messages detected:', errorMessages);
       
-      // Take screenshot for debugging
-      await globalPage.screenshot({
-        path: `error-detected-${Date.now()}.png`,
-        fullPage: true
-      });
+      // Removed error screenshot for Render optimization
       
       // Try to handle the error by refreshing
       console.log('🔄 Attempting to handle error by refreshing...');
@@ -473,80 +465,6 @@ async function checkForErrorMessages() {
   }
 }
 
-// Enhanced compatibility warning handler
-async function handleCompatibilityWarnings() {
-  try {
-    console.log('🔍 Checking for compatibility warnings...');
-
-    // Wait for potential warnings to appear
-    await globalPage.waitForTimeout(5000);
-
-    const pageContent = await globalPage.evaluate(() => {
-      return {
-        text: document.body.innerText.toLowerCase(),
-        html: document.body.innerHTML
-      };
-    });
-
-    console.log('📄 Page content preview:', pageContent.text.substring(0, 300));
-
-    if (pageContent.text.includes('chrome') || 
-        pageContent.text.includes('browser') || 
-        pageContent.text.includes('supported') ||
-        pageContent.text.includes("can't scan")) {
-      
-      console.log('⚠️ Compatibility warning or error detected');
-
-      // Take screenshot for debugging
-      await globalPage.screenshot({
-        path: `compatibility-warning-${Date.now()}.png`,
-        fullPage: true
-      });
-
-      const continueSelectors = [
-        'button[data-testid="continue-button"]',
-        'button:has-text("Continue")',
-        'button:has-text("CONTINUE")',
-        'button:has-text("Use WhatsApp Web")',
-        'button[type="button"]',
-        '[role="button"]:has-text("Continue")',
-        'a[href*="web.whatsapp.com"]',
-        'button',
-        '[role="button"]'
-      ];
-
-      let buttonClicked = false;
-      for (const selector of continueSelectors) {
-        try {
-          const buttons = await globalPage.$$(selector);
-          for (const button of buttons) {
-            if (await button.isVisible()) {
-              const buttonText = await button.textContent();
-              console.log(`🔍 Found button: "${buttonText}" with selector: ${selector}`);
-              
-              await button.click();
-              console.log(`✅ Clicked button: "${buttonText}"`);
-              await globalPage.waitForTimeout(5000);
-              buttonClicked = true;
-              break;
-            }
-          }
-          if (buttonClicked) break;
-        } catch (e) {
-          continue;
-        }
-      }
-
-      if (!buttonClicked) {
-        console.log('⚠️ No continue button found, trying to refresh page...');
-        await globalPage.reload({ waitUntil: 'domcontentloaded' });
-        await globalPage.waitForTimeout(10000);
-      }
-    }
-  } catch (error) {
-    console.log('⚠️ Error handling compatibility warnings:', error.message);
-  }
-}
 
 // Enhanced login status check
 async function checkLoginStatus() {
@@ -1280,14 +1198,7 @@ app.post('/send-messages', async (req, res) => {
   }
 });
 
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    browserActive: !!globalBrowser,
-    loggedIn: isLoggedIn
-  });
-});
+
 
 app.get('/debug-files/:filename', (req, res) => {
   try {
@@ -1375,27 +1286,7 @@ app.get('/get-whatsapp-list', async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to fetch WhatsApp list' });
   }
 });
-app.post('/close', async (req, res) => {
-  try {
-    if (globalBrowser) {
-      await globalBrowser.close();
-      globalBrowser = null;
-      globalPage = null;
-      isLoggedIn = false;
-      console.log('🔒 WhatsApp session closed');
-    }
 
-    res.json({
-      success: true,
-      message: 'WhatsApp session closed successfully'
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
 
 app.get('/status', (req, res) => {
   res.json({
