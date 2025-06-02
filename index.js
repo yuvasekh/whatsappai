@@ -35,57 +35,6 @@ function detectEnvironment() {
   return { isCloud, ...indicators };
 }
 
-// Force Playwright installation for cloud environments
-
-// Enhanced Playwright installation
-async function installPlaywright() {
-  try {
-    console.log('🔍 Installing Playwright browsers...');
-    const { execSync } = require('child_process');
-
-    // Set environment variables for Render
-    const renderEnv = {
-      ...process.env,
-      PLAYWRIGHT_BROWSERS_PATH: '/opt/render/.cache',
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0',
-      DEBIAN_FRONTEND: 'noninteractive'
-    };
-
-    const installCommands = [
-      'PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache npx playwright install chromium',
-      'npx playwright install chromium',
-      'PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache npx playwright install chromium --force'
-    ];
-
-    let installSuccess = false;
-    for (const command of installCommands) {
-      try {
-        console.log(`🔄 Trying: ${command}`);
-        execSync(command, {
-          stdio: 'inherit',
-          timeout: 600000, // 10 minutes for Render
-          env: renderEnv
-        });
-        console.log(`✅ Success with: ${command}`);
-        installSuccess = true;
-        break;
-      } catch (cmdError) {
-        console.log(`❌ Failed: ${command} - ${cmdError.message}`);
-        continue;
-      }
-    }
-
-    if (!installSuccess) {
-      console.log('⚠️ All installation methods failed, attempting to continue...');
-    }
-
-    return installSuccess;
-  } catch (installError) {
-    console.error('❌ Browser installation failed:', installError.message);
-    return false;
-  }
-}
-
 // Enhanced browser launch options specifically for Render and cloud platforms
 function getBrowserLaunchOptions(env) {
   const baseArgs = [
@@ -95,16 +44,42 @@ function getBrowserLaunchOptions(env) {
     '--disable-gpu',
     '--no-first-run',
     '--disable-extensions',
+    '--disable-default-apps',
     '--disable-sync',
     '--disable-translate',
     '--hide-scrollbars',
     '--mute-audio',
+    '--no-zygote',
     '--disable-background-timer-throttling',
     '--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding',
+    '--disable-features=TranslateUI,VizDisplayCompositor',
+    '--disable-ipc-flooding-protection',
     '--disable-blink-features=AutomationControlled',
     '--disable-web-security',
-    '--memory-pressure-off'
+    '--disable-features=VizDisplayCompositor',
+    '--disable-extensions-file-access-check',
+    '--disable-plugins-discovery',
+    '--disable-component-extensions-with-background-pages',
+    '--disable-default-apps',
+    '--disable-background-networking',
+    '--disable-background-timer-throttling',
+    '--disable-client-side-phishing-detection',
+    '--disable-component-update',
+    '--disable-domain-reliability',
+    '--disable-features=AudioServiceOutOfProcess',
+    '--disable-hang-monitor',
+    '--disable-prompt-on-repost',
+    '--disable-sync',
+    '--metrics-recording-only',
+    '--no-crash-upload',
+    '--no-default-browser-check',
+    '--no-pings',
+    '--password-store=basic',
+    '--use-mock-keychain',
+    '--force-color-profile=srgb',
+    '--memory-pressure-off',
+    '--disable-features=site-per-process'
   ];
 
   // Enhanced user agent that mimics a real Chrome browser
@@ -172,35 +147,45 @@ async function initializeWhatsApp() {
     const env = detectEnvironment();
     console.log(`🔧 Environment: ${env.isCloud ? 'Cloud' : 'Local'}`);
 
-    // Check if already initialized and logged in
-    if (globalBrowser && globalPage && isLoggedIn) {
-      console.log('✅ WhatsApp session already active and logged in');
-      return { loggedIn: true, alreadyInitialized: true };
-    }
-
-    // Check if browser exists but need to verify login status
-    if (globalBrowser && globalPage) {
-      console.log('� Browser exists, checking current login status...');
-      const currentLoginStatus = await checkLoginStatus();
-      if (currentLoginStatus.loggedIn) {
-        isLoggedIn = true;
-        isWhatsAppReady = true;
-        console.log('✅ Already logged in, skipping initialization');
-        return { loggedIn: true, alreadyInitialized: true };
-      }
-    }
-
-    // Force Playwright installation every time on cloud environments
+    // Force browser installation in cloud environments
     if (env.isCloud) {
-      console.log('🔧 Force installing Playwright browsers on cloud...');
-      const installSuccess = await installPlaywright();
-      if (!installSuccess) {
-        console.log('⚠️ Browser installation failed, but attempting to continue...');
+      try {
+        console.log('🔍 Installing Playwright browsers...');
+        const { execSync } = require('child_process');
+
+        const installCommands = [
+          'npx playwright install chromium --with-deps',
+          'npx playwright install-deps chromium',
+          'npx playwright install chromium'
+        ];
+
+        let installSuccess = false;
+        for (const command of installCommands) {
+          try {
+            console.log(`🔄 Trying: ${command}`);
+            execSync(command, {
+              stdio: 'inherit',
+              timeout: 300000 // 5 minutes timeout
+            });
+            console.log(`✅ Success with: ${command}`);
+            installSuccess = true;
+            break;
+          } catch (cmdError) {
+            console.log(`❌ Failed: ${command} - ${cmdError.message}`);
+            continue;
+          }
+        }
+
+        if (!installSuccess) {
+          console.log('⚠️ All installation methods failed, attempting to continue...');
+        }
+      } catch (installError) {
+        console.error('❌ Browser installation failed:', installError.message);
       }
     }
 
     const launchOptions = getBrowserLaunchOptions(env);
-    console.log('🚀 Launching browser...');
+    console.log('🚀 Launching browser with options:', JSON.stringify(launchOptions, null, 2));
     
     globalBrowser = await chromium.launch(launchOptions);
 
@@ -398,44 +383,25 @@ async function initializeWhatsApp() {
       return { loggedIn: true };
     }
 
-    // Check if already logged in after page load
-    const finalLoginCheck = await checkLoginStatus();
-    if (finalLoginCheck.loggedIn) {
-      isLoggedIn = true;
-      isWhatsAppReady = true;
-      console.log('✅ User is already logged in after page load');
-      return { loggedIn: true };
-    }
-
     // Enhanced QR code detection with multiple attempts
     let qrResult = null;
     const qrAttempts = 5;
-
+    
     for (let attempt = 1; attempt <= qrAttempts; attempt++) {
       console.log(`🔍 QR code extraction attempt ${attempt}/${qrAttempts}`);
-
-      // Check if user logged in during attempts
-      const loginCheck = await checkLoginStatus();
-      if (loginCheck.loggedIn) {
-        isLoggedIn = true;
-        isWhatsAppReady = true;
-        console.log('✅ User logged in during QR extraction attempts');
-        return { loggedIn: true };
-      }
-
+      
       qrResult = await extractQRCode();
-
+      
       if (qrResult.success) {
-        console.log('✅ QR code extracted successfully');
         break;
       }
-
+      
       if (attempt < qrAttempts) {
         console.log('⏳ Waiting before next QR extraction attempt...');
         await globalPage.waitForTimeout(5000);
-
-        // Try refreshing the page every 2 attempts
-        if (attempt % 2 === 0) {
+        
+        // Try refreshing the page
+        if (attempt === 3) {
           console.log('🔄 Refreshing page for QR code...');
           await globalPage.reload({ waitUntil: 'domcontentloaded' });
           await globalPage.waitForTimeout(10000);
@@ -507,6 +473,80 @@ async function checkForErrorMessages() {
   }
 }
 
+// Enhanced compatibility warning handler
+async function handleCompatibilityWarnings() {
+  try {
+    console.log('🔍 Checking for compatibility warnings...');
+
+    // Wait for potential warnings to appear
+    await globalPage.waitForTimeout(5000);
+
+    const pageContent = await globalPage.evaluate(() => {
+      return {
+        text: document.body.innerText.toLowerCase(),
+        html: document.body.innerHTML
+      };
+    });
+
+    console.log('📄 Page content preview:', pageContent.text.substring(0, 300));
+
+    if (pageContent.text.includes('chrome') || 
+        pageContent.text.includes('browser') || 
+        pageContent.text.includes('supported') ||
+        pageContent.text.includes("can't scan")) {
+      
+      console.log('⚠️ Compatibility warning or error detected');
+
+      // Take screenshot for debugging
+      await globalPage.screenshot({
+        path: `compatibility-warning-${Date.now()}.png`,
+        fullPage: true
+      });
+
+      const continueSelectors = [
+        'button[data-testid="continue-button"]',
+        'button:has-text("Continue")',
+        'button:has-text("CONTINUE")',
+        'button:has-text("Use WhatsApp Web")',
+        'button[type="button"]',
+        '[role="button"]:has-text("Continue")',
+        'a[href*="web.whatsapp.com"]',
+        'button',
+        '[role="button"]'
+      ];
+
+      let buttonClicked = false;
+      for (const selector of continueSelectors) {
+        try {
+          const buttons = await globalPage.$$(selector);
+          for (const button of buttons) {
+            if (await button.isVisible()) {
+              const buttonText = await button.textContent();
+              console.log(`🔍 Found button: "${buttonText}" with selector: ${selector}`);
+              
+              await button.click();
+              console.log(`✅ Clicked button: "${buttonText}"`);
+              await globalPage.waitForTimeout(5000);
+              buttonClicked = true;
+              break;
+            }
+          }
+          if (buttonClicked) break;
+        } catch (e) {
+          continue;
+        }
+      }
+
+      if (!buttonClicked) {
+        console.log('⚠️ No continue button found, trying to refresh page...');
+        await globalPage.reload({ waitUntil: 'domcontentloaded' });
+        await globalPage.waitForTimeout(10000);
+      }
+    }
+  } catch (error) {
+    console.log('⚠️ Error handling compatibility warnings:', error.message);
+  }
+}
 
 // Enhanced login status check
 async function checkLoginStatus() {
@@ -750,10 +790,10 @@ async function extractQRCode() {
   }
 }
 
-// Enhanced QR scan monitoring with better login detection
+// Monitor QR scan completion
 async function monitorQRScanCompletion() {
   try {
-    console.log('🔍 Starting enhanced QR scan monitoring...');
+    console.log('🔍 Starting QR scan monitoring...');
 
     const env = detectEnvironment();
     const maxWaitTime = env.isCloud ? 300000 : 180000;
@@ -766,49 +806,38 @@ async function monitorQRScanCompletion() {
           return;
         }
 
-        // Skip if already logged in
-        if (isLoggedIn) {
-          clearInterval(checkInterval);
-          return;
-        }
-
-        console.log('🔍 Checking login status...');
         const loginResult = await checkLoginStatus();
 
         if (loginResult.loggedIn) {
-          console.log('✅ Login detected with:', loginResult.foundSelector);
           console.log('✅ QR scan completed! User is now logged in');
           isLoggedIn = true;
-          isWhatsAppReady = true;
           clearInterval(checkInterval);
 
-          // Handle any post-login dialogs
-          await handleDialogs();
-          return;
-        }
+          const timestamp = Date.now();
+          await globalPage.screenshot({
+            path: `qr-scan-success-${timestamp}.png`,
+            fullPage: true
+          });
 
-        // Check if QR code is still visible, refresh if needed
-        const qrElements = await globalPage.$$('canvas[aria-label*="QR"], canvas[aria-label*="Scan"]');
-        if (qrElements.length === 0) {
-          console.log('🔄 QR code disappeared, refreshing page...');
-          try {
-            await globalPage.reload({ waitUntil: 'domcontentloaded' });
-            await globalPage.waitForTimeout(8000);
-          } catch (e) {
-            console.log('⚠️ Error refreshing for QR:', e.message);
-          }
+          return;
         }
 
         if ((Date.now() - startTime) > maxWaitTime) {
           console.log('⏰ QR scan monitoring timeout reached');
           clearInterval(checkInterval);
+
+          const timestamp = Date.now();
+          await globalPage.screenshot({
+            path: `qr-scan-timeout-${timestamp}.png`,
+            fullPage: true
+          });
           return;
         }
 
       } catch (error) {
         console.log('⚠️ Error during QR monitoring:', error.message);
       }
-    }, 5000); // Check every 5 seconds for faster detection
+    }, 15000); // Check every 15 seconds
 
   } catch (error) {
     console.error('❌ QR scan monitoring failed:', error.message);
@@ -1053,49 +1082,9 @@ async function sendCombinedMessage(mobile, message = '', mediaUrl = '', caption 
 
     console.log(`📝 Combined content to send:\n${combinedContent}`);
 
-    // Type the combined content using multiple methods for reliability
-    let typingSuccess = false;
-
-    // Method 1: Direct typing with shorter timeout
-    try {
-      await messageBox.type(combinedContent, { delay: 30, timeout: 15000 });
-      typingSuccess = true;
-      console.log('✅ Direct typing successful');
-    } catch (typeError) {
-      console.log('⚠️ Direct typing failed, trying alternative method...');
-
-      // Method 2: Focus and use keyboard
-      try {
-        await messageBox.focus();
-        await globalPage.keyboard.type(combinedContent, { delay: 30 });
-        typingSuccess = true;
-        console.log('✅ Keyboard typing successful');
-      } catch (keyboardError) {
-        console.log('⚠️ Keyboard typing failed, trying clipboard method...');
-
-        // Method 3: Use clipboard
-        try {
-          await globalPage.evaluate((text) => {
-            navigator.clipboard.writeText(text);
-          }, combinedContent);
-
-          await messageBox.focus();
-          await globalPage.keyboard.press('Control+V');
-          typingSuccess = true;
-          console.log('✅ Clipboard typing successful');
-        } catch (clipboardError) {
-          console.log('❌ All typing methods failed');
-        }
-      }
-    }
-
-    if (!typingSuccess) {
-      throw new Error('Failed to type message content');
-    }
-
+    await messageBox.type(combinedContent, { delay: 50 });
     await globalPage.waitForTimeout(2000);
 
-    // Send the message
     await globalPage.keyboard.press('Enter');
     await globalPage.waitForTimeout(3000);
 
@@ -1250,7 +1239,14 @@ app.post('/send-messages', async (req, res) => {
   }
 });
 
-
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    browserActive: !!globalBrowser,
+    loggedIn: isLoggedIn
+  });
+});
 
 app.get('/debug-files/:filename', (req, res) => {
   try {
@@ -1338,7 +1334,27 @@ app.get('/get-whatsapp-list', async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to fetch WhatsApp list' });
   }
 });
+app.post('/close', async (req, res) => {
+  try {
+    if (globalBrowser) {
+      await globalBrowser.close();
+      globalBrowser = null;
+      globalPage = null;
+      isLoggedIn = false;
+      console.log('🔒 WhatsApp session closed');
+    }
 
+    res.json({
+      success: true,
+      message: 'WhatsApp session closed successfully'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
 app.get('/status', (req, res) => {
   res.json({
