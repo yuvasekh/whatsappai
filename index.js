@@ -52,13 +52,9 @@ async function installPlaywright() {
     };
 
     const installCommands = [
-      'npx playwright install-deps',
-      'PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache npx playwright install chromium --with-deps',
-      'npx playwright install chromium --with-deps',
-      'PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache npx playwright install chromium --force',
-      'npx playwright install chromium --force',
+      'PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache npx playwright install chromium',
       'npx playwright install chromium',
-      'npm run postinstall'
+      'PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache npx playwright install chromium --force'
     ];
 
     let installSuccess = false;
@@ -99,42 +95,16 @@ function getBrowserLaunchOptions(env) {
     '--disable-gpu',
     '--no-first-run',
     '--disable-extensions',
-    '--disable-default-apps',
     '--disable-sync',
     '--disable-translate',
     '--hide-scrollbars',
     '--mute-audio',
-    '--no-zygote',
     '--disable-background-timer-throttling',
     '--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding',
-    '--disable-features=TranslateUI,VizDisplayCompositor',
-    '--disable-ipc-flooding-protection',
     '--disable-blink-features=AutomationControlled',
     '--disable-web-security',
-    '--disable-features=VizDisplayCompositor',
-    '--disable-extensions-file-access-check',
-    '--disable-plugins-discovery',
-    '--disable-component-extensions-with-background-pages',
-    '--disable-default-apps',
-    '--disable-background-networking',
-    '--disable-background-timer-throttling',
-    '--disable-client-side-phishing-detection',
-    '--disable-component-update',
-    '--disable-domain-reliability',
-    '--disable-features=AudioServiceOutOfProcess',
-    '--disable-hang-monitor',
-    '--disable-prompt-on-repost',
-    '--disable-sync',
-    '--metrics-recording-only',
-    '--no-crash-upload',
-    '--no-default-browser-check',
-    '--no-pings',
-    '--password-store=basic',
-    '--use-mock-keychain',
-    '--force-color-profile=srgb',
-    '--memory-pressure-off',
-    '--disable-features=site-per-process'
+    '--memory-pressure-off'
   ];
 
   // Enhanced user agent that mimics a real Chrome browser
@@ -230,7 +200,7 @@ async function initializeWhatsApp() {
     }
 
     const launchOptions = getBrowserLaunchOptions(env);
-    console.log('🚀 Launching browser with options:', JSON.stringify(launchOptions, null, 2));
+    console.log('🚀 Launching browser...');
     
     globalBrowser = await chromium.launch(launchOptions);
 
