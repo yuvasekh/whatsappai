@@ -790,14 +790,16 @@ async function extractQRCode() {
   }
 }
 
-// Monitor QR scan completion
+// Enhanced QR scan monitoring with auto-refresh for fresh QR codes
 async function monitorQRScanCompletion() {
   try {
-    console.log('🔍 Starting QR scan monitoring...');
+    console.log('🔍 Starting QR scan monitoring with auto-refresh...');
 
     const env = detectEnvironment();
     const maxWaitTime = env.isCloud ? 300000 : 180000;
+    const qrRefreshInterval = 120000; // Refresh QR every 2 minutes
     const startTime = Date.now();
+    let lastQRRefresh = Date.now();
 
     const checkInterval = setInterval(async () => {
       try {
@@ -806,11 +808,20 @@ async function monitorQRScanCompletion() {
           return;
         }
 
+        // Skip if already logged in
+        if (isLoggedIn) {
+          clearInterval(checkInterval);
+          return;
+        }
+
+        const currentTime = Date.now();
+        console.log('🔍 Checking login status...');
         const loginResult = await checkLoginStatus();
 
         if (loginResult.loggedIn) {
           console.log('✅ QR scan completed! User is now logged in');
           isLoggedIn = true;
+          isWhatsAppReady = true;
           clearInterval(checkInterval);
 
           const timestamp = Date.now();
@@ -822,22 +833,53 @@ async function monitorQRScanCompletion() {
           return;
         }
 
-        if ((Date.now() - startTime) > maxWaitTime) {
-          console.log('⏰ QR scan monitoring timeout reached');
-          clearInterval(checkInterval);
+        // Auto-refresh QR code every 2 minutes to prevent timeout
+        if ((currentTime - lastQRRefresh) > qrRefreshInterval) {
+          console.log('🔄 Auto-refreshing page for fresh QR code...');
+          try {
+            await globalPage.reload({ waitUntil: 'domcontentloaded' });
+            await globalPage.waitForTimeout(8000);
+            await handleDialogs();
+            lastQRRefresh = currentTime;
+            console.log('✅ Page refreshed, new QR code should be available');
+          } catch (e) {
+            console.log('⚠️ Error refreshing for QR:', e.message);
+          }
+        }
 
-          const timestamp = Date.now();
-          await globalPage.screenshot({
-            path: `qr-scan-timeout-${timestamp}.png`,
-            fullPage: true
-          });
-          return;
+        // Check if QR code is still visible, refresh if disappeared
+        const qrElements = await globalPage.$$('canvas[aria-label*="QR"], canvas[aria-label*="Scan"]');
+        if (qrElements.length === 0) {
+          console.log('🔄 QR code disappeared, refreshing page immediately...');
+          try {
+            await globalPage.reload({ waitUntil: 'domcontentloaded' });
+            await globalPage.waitForTimeout(8000);
+            await handleDialogs();
+            lastQRRefresh = currentTime;
+          } catch (e) {
+            console.log('⚠️ Error refreshing for QR:', e.message);
+          }
+        }
+
+        if ((currentTime - startTime) > maxWaitTime) {
+          console.log('⏰ QR scan monitoring timeout reached, refreshing one more time...');
+          try {
+            await globalPage.reload({ waitUntil: 'domcontentloaded' });
+            await globalPage.waitForTimeout(8000);
+            await handleDialogs();
+            console.log('🔄 Final refresh completed, QR monitoring will continue...');
+          } catch (e) {
+            console.log('⚠️ Error in final refresh:', e.message);
+          }
+          // Reset timer to continue monitoring with fresh QR
+          startTime = Date.now();
+          lastQRRefresh = Date.now();
         }
 
       } catch (error) {
         console.log('⚠️ Error during QR monitoring:', error.message);
       }
-    }, 15000); // Check every 15 seconds
+    }, 10000); // Check every 10 seconds
 
   } catch (error) {
     console.error('❌ QR scan monitoring failed:', error.message);
@@ -1246,6 +1288,53 @@ app.get('/health', (req, res) => {
     browserActive: !!globalBrowser,
     loggedIn: isLoggedIn
   });
+});
+
+// QR refresh endpoint
+app.post('/refresh-qr', async (req, res) => {
+  try {
+    if (!globalPage) {
+      return res.status(400).json({
+        success: false,
+        error: 'WhatsApp session not initialized'
+      });
+    }
+
+    if (isLoggedIn) {
+      return res.json({
+        success: true,
+        message: 'Already logged in, no QR refresh needed'
+      });
+    }
+
+    console.log('🔄 Manual QR refresh requested...');
+    await globalPage.reload({ waitUntil: 'domcontentloaded' });
+    await globalPage.waitForTimeout(8000);
+    await handleDialogs();
+
+    // Extract fresh QR code
+    const qrResult = await extractQRCode();
+
+    if (qrResult.success) {
+      res.json({
+        success: true,
+        message: 'QR code refreshed successfully',
+        qrCode: qrResult.qrCode,
+        metadata: qrResult.metadata
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: qrResult.error || 'Failed to extract fresh QR code'
+      });
+    }
+  } catch (error) {
+    console.error('QR refresh error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 app.get('/debug-files/:filename', (req, res) => {
