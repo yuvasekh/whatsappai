@@ -35,70 +35,7 @@ function detectEnvironment() {
   return { isCloud, ...indicators };
 }
 
-// Enhanced Playwright installation check with actual browser verification
-async function checkPlaywrightInstallation() {
-  try {
-    const { execSync } = require('child_process');
-    const fs = require('fs');
-    const path = require('path');
-
-    // Check if playwright is installed
-    const version = execSync('npx playwright --version', { encoding: 'utf8' });
-    console.log(`✅ Playwright already installed: ${version.trim()}`);
-
-    // Check if browser executable actually exists
-    const possiblePaths = [
-      '/opt/render/.cache/ms-playwright/chromium-1091/chrome-linux/chrome',
-      '/opt/render/.cache/ms-playwright/chromium-*/chrome-linux/chrome',
-      process.env.HOME + '/.cache/ms-playwright/chromium-*/chrome-linux/chrome'
-    ];
-
-    let browserFound = false;
-    for (const browserPath of possiblePaths) {
-      try {
-        if (browserPath.includes('*')) {
-          // Handle wildcard paths
-          const baseDir = path.dirname(browserPath);
-          if (fs.existsSync(baseDir)) {
-            const dirs = fs.readdirSync(baseDir);
-            for (const dir of dirs) {
-              if (dir.startsWith('chromium-')) {
-                const fullPath = path.join(baseDir, dir, 'chrome-linux/chrome');
-                if (fs.existsSync(fullPath)) {
-                  console.log(`✅ Chromium browser found at: ${fullPath}`);
-                  browserFound = true;
-                  break;
-                }
-              }
-            }
-          }
-        } else {
-          if (fs.existsSync(browserPath)) {
-            console.log(`✅ Chromium browser found at: ${browserPath}`);
-            browserFound = true;
-            break;
-          }
-        }
-      } catch (e) {
-        continue;
-      }
-
-      if (browserFound) break;
-    }
-
-    if (!browserFound) {
-      console.log('⚠️ Playwright installed but browser executable not found');
-      return true; // Installation needed
-    }
-
-    console.log('✅ Chromium browser already installed and verified');
-    return false; // No installation needed
-
-  } catch (error) {
-    console.log('⚠️ Playwright not found, installation required');
-    return true; // Installation needed
-  }
-}
+// Force Playwright installation for cloud environments
 
 // Enhanced Playwright installation
 async function installPlaywright() {
@@ -115,11 +52,13 @@ async function installPlaywright() {
     };
 
     const installCommands = [
+      'npx playwright install-deps',
       'PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache npx playwright install chromium --with-deps',
       'npx playwright install chromium --with-deps',
+      'PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache npx playwright install chromium --force',
+      'npx playwright install chromium --force',
       'npx playwright install chromium',
-      'PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache npx playwright install chromium',
-      'npx playwright install --force chromium'
+      'npm run postinstall'
     ];
 
     let installSuccess = false;
@@ -281,15 +220,12 @@ async function initializeWhatsApp() {
       }
     }
 
-    // Smart Playwright installation - only install if needed
+    // Force Playwright installation every time on cloud environments
     if (env.isCloud) {
-      const needsInstallation = await checkPlaywrightInstallation();
-      if (needsInstallation) {
-        console.log('🔧 Installing Playwright browsers...');
-        const installSuccess = await installPlaywright();
-        if (!installSuccess) {
-          console.log('⚠️ Browser installation failed, but attempting to continue...');
-        }
+      console.log('🔧 Force installing Playwright browsers on cloud...');
+      const installSuccess = await installPlaywright();
+      if (!installSuccess) {
+        console.log('⚠️ Browser installation failed, but attempting to continue...');
       }
     }
 
