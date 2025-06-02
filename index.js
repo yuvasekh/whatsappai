@@ -836,10 +836,11 @@ async function monitorQRScanCompletion() {
           console.log('🔄 Auto-refreshing page for fresh QR code...');
           try {
             await globalPage.reload({ waitUntil: 'domcontentloaded' });
-            await globalPage.waitForTimeout(8000);
+            console.log('⏳ Waiting 30 seconds for QR code to load...');
+            await globalPage.waitForTimeout(30000); // Wait 30 seconds for QR to load
             await handleDialogs();
             lastQRRefresh = currentTime;
-            console.log('✅ Page refreshed, new QR code should be available');
+            console.log('✅ Page refreshed and QR load wait completed');
           } catch (e) {
             console.log('⚠️ Error refreshing for QR:', e.message);
           }
@@ -848,12 +849,14 @@ async function monitorQRScanCompletion() {
         // Check if QR code is still visible, refresh if disappeared
         const qrElements = await globalPage.$$('canvas[aria-label*="QR"], canvas[aria-label*="Scan"]');
         if (qrElements.length === 0) {
-          console.log('🔄 QR code disappeared, refreshing page immediately...');
+          console.log('🔄 QR code not visible, refreshing page...');
           try {
             await globalPage.reload({ waitUntil: 'domcontentloaded' });
-            await globalPage.waitForTimeout(8000);
+            console.log('⏳ Waiting 30 seconds for QR code to load...');
+            await globalPage.waitForTimeout(30000); // Wait 30 seconds for QR to load
             await handleDialogs();
             lastQRRefresh = currentTime;
+            console.log('✅ Page refreshed and QR load wait completed');
           } catch (e) {
             console.log('⚠️ Error refreshing for QR:', e.message);
           }
@@ -863,7 +866,8 @@ async function monitorQRScanCompletion() {
           console.log('⏰ QR scan monitoring timeout reached, refreshing one more time...');
           try {
             await globalPage.reload({ waitUntil: 'domcontentloaded' });
-            await globalPage.waitForTimeout(8000);
+            console.log('⏳ Waiting 30 seconds for QR code to load after timeout...');
+            await globalPage.waitForTimeout(30000); // Wait 30 seconds for QR to load
             await handleDialogs();
             console.log('🔄 Final refresh completed, QR monitoring will continue...');
           } catch (e) {
@@ -1307,7 +1311,8 @@ app.post('/refresh-qr', async (req, res) => {
 
     console.log('🔄 Manual QR refresh requested...');
     await globalPage.reload({ waitUntil: 'domcontentloaded' });
-    await globalPage.waitForTimeout(8000);
+    console.log('⏳ Waiting 30 seconds for QR code to load...');
+    await globalPage.waitForTimeout(30000); // Wait 30 seconds for QR to load
     await handleDialogs();
 
     // Extract fresh QR code
