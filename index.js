@@ -60,7 +60,7 @@ async function checkPlaywrightInstallation() {
   }
 }
 
-// Install Playwright with optimized approach
+// Enhanced Playwright installation for Render
 async function installPlaywright() {
   if (playwrightInstalled) {
     console.log('✅ Playwright already installed, skipping installation');
@@ -68,13 +68,26 @@ async function installPlaywright() {
   }
 
   try {
-    console.log('🔍 Installing Playwright browsers...');
+    console.log('🔍 Installing Playwright browsers for Render...');
     const { execSync } = require('child_process');
 
+    // Set environment variables for Render
+    const renderEnv = {
+      ...process.env,
+      PLAYWRIGHT_BROWSERS_PATH: '/opt/render/.cache',
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '0',
+      DEBIAN_FRONTEND: 'noninteractive'
+    };
+
     const installCommands = [
+      // Try with explicit browser path
+      'PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache npx playwright install chromium --with-deps',
+      // Standard installation
       'npx playwright install chromium --with-deps',
+      // Just chromium without deps
       'npx playwright install chromium',
-      'npx playwright install-deps'
+      // Force reinstall
+      'npx playwright install --force chromium'
     ];
 
     for (const command of installCommands) {
@@ -82,7 +95,8 @@ async function installPlaywright() {
         console.log(`🔄 Executing: ${command}`);
         execSync(command, {
           stdio: 'inherit',
-          timeout: 300000 // 5 minutes timeout
+          timeout: 600000, // 10 minutes for Render
+          env: renderEnv
         });
         console.log(`✅ Success: ${command}`);
         playwrightInstalled = true;
@@ -91,6 +105,22 @@ async function installPlaywright() {
         console.log(`❌ Failed: ${command} - ${cmdError.message}`);
         continue;
       }
+    }
+
+    // Last resort: try manual directory creation and installation
+    try {
+      console.log('🔧 Attempting manual installation...');
+      execSync('mkdir -p /opt/render/.cache/ms-playwright', { stdio: 'inherit' });
+      execSync('PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache npx playwright install chromium', {
+        stdio: 'inherit',
+        timeout: 600000,
+        env: renderEnv
+      });
+      console.log('✅ Manual installation successful');
+      playwrightInstalled = true;
+      return true;
+    } catch (manualError) {
+      console.log('❌ Manual installation failed:', manualError.message);
     }
 
     console.log('⚠️ All installation methods failed, attempting to continue...');

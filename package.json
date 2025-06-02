@@ -5,11 +5,11 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "postinstall": "npx playwright install-deps chromium || echo 'Deps install failed' && npx playwright install chromium || echo 'Browser install failed'",
+    "postinstall": "PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache npx playwright install chromium --with-deps || npx playwright install chromium || echo 'Browser install completed with warnings'",
     "start": "node index.js",
     "dev": "node index.js",
-    "install-browser": "npx playwright install chromium",
-    "force-install": "npx playwright install-deps chromium && npx playwright install chromium"
+    "install-browser": "PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache npx playwright install chromium",
+    "force-install": "PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache npx playwright install chromium --with-deps --force"
   },
   "dependencies": {
     "axios": "^1.9.0",
