@@ -154,8 +154,6 @@ async function initializeWhatsApp() {
         const { execSync } = require('child_process');
 
         const installCommands = [
-          'npx playwright install chromium --with-deps',
-          'npx playwright install-deps chromium',
           'npx playwright install chromium'
         ];
 
