@@ -12,11 +12,16 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(cors());
 
-// Global browser instance
+// Global browser instance and state management
 let globalBrowser = null;
 let globalPage = null;
+let globalContext = null;
 let isLoggedIn = false;
 let isWhatsAppReady = false;
+let loginCheckInterval = null;
+let playwrightInstalled = false;
+let lastQRRefresh = 0;
+const QR_REFRESH_INTERVAL = 30000; // 30 seconds
 
 // Enhanced environment detection
 function detectEnvironment() {
@@ -30,12 +35,73 @@ function detectEnvironment() {
   };
 
   const isCloud = Object.values(indicators).some(Boolean);
-
   console.log('🔧 Environment Detection:', indicators);
   return { isCloud, ...indicators };
 }
 
-// Enhanced browser launch options specifically for Render and cloud platforms
+// Check if Playwright is already installed
+async function checkPlaywrightInstallation() {
+  try {
+    const { execSync } = require('child_process');
+    
+    // Try to get Playwright version
+    const version = execSync('npx playwright --version', { 
+      stdio: 'pipe',
+      timeout: 10000 
+    }).toString().trim();
+    
+    console.log(`✅ Playwright already installed: ${version}`);
+    playwrightInstalled = true;
+    return true;
+  } catch (error) {
+    console.log('❌ Playwright not found or not properly installed');
+    playwrightInstalled = false;
+    return false;
+  }
+}
+
+// Install Playwright with optimized approach
+async function installPlaywright() {
+  if (playwrightInstalled) {
+    console.log('✅ Playwright already installed, skipping installation');
+    return true;
+  }
+
+  try {
+    console.log('🔍 Installing Playwright browsers...');
+    const { execSync } = require('child_process');
+
+    const installCommands = [
+      'npx playwright install chromium --with-deps',
+      'npx playwright install chromium',
+      'npx playwright install-deps'
+    ];
+
+    for (const command of installCommands) {
+      try {
+        console.log(`🔄 Executing: ${command}`);
+        execSync(command, {
+          stdio: 'inherit',
+          timeout: 300000 // 5 minutes timeout
+        });
+        console.log(`✅ Success: ${command}`);
+        playwrightInstalled = true;
+        return true;
+      } catch (cmdError) {
+        console.log(`❌ Failed: ${command} - ${cmdError.message}`);
+        continue;
+      }
+    }
+
+    console.log('⚠️ All installation methods failed, attempting to continue...');
+    return false;
+  } catch (installError) {
+    console.error('❌ Browser installation failed:', installError.message);
+    return false;
+  }
+}
+
+// Optimized browser launch options for Render
 function getBrowserLaunchOptions(env) {
   const baseArgs = [
     '--no-sandbox',
@@ -49,52 +115,27 @@ function getBrowserLaunchOptions(env) {
     '--disable-translate',
     '--hide-scrollbars',
     '--mute-audio',
-    '--no-zygote',
     '--disable-background-timer-throttling',
     '--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding',
     '--disable-features=TranslateUI,VizDisplayCompositor',
-    '--disable-ipc-flooding-protection',
     '--disable-blink-features=AutomationControlled',
     '--disable-web-security',
     '--disable-features=VizDisplayCompositor',
-    '--disable-extensions-file-access-check',
-    '--disable-plugins-discovery',
-    '--disable-component-extensions-with-background-pages',
-    '--disable-default-apps',
-    '--disable-background-networking',
-    '--disable-background-timer-throttling',
-    '--disable-client-side-phishing-detection',
-    '--disable-component-update',
-    '--disable-domain-reliability',
-    '--disable-features=AudioServiceOutOfProcess',
-    '--disable-hang-monitor',
-    '--disable-prompt-on-repost',
-    '--disable-sync',
-    '--metrics-recording-only',
-    '--no-crash-upload',
-    '--no-default-browser-check',
-    '--no-pings',
-    '--password-store=basic',
-    '--use-mock-keychain',
-    '--force-color-profile=srgb',
     '--memory-pressure-off',
     '--disable-features=site-per-process'
   ];
 
-  // Enhanced user agent that mimics a real Chrome browser
-  const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
   const launchOptions = {
     headless: true,
-    args: baseArgs
+    args: baseArgs,
+    timeout: 60000
   };
 
   // Render-specific optimizations
-  if (env.render) {
+  if (env.render || env.isCloud) {
     launchOptions.args.push(
       '--single-process',
-      '--memory-pressure-off',
       '--max_old_space_size=4096',
       '--disable-features=VizDisplayCompositor',
       '--run-all-compositor-stages-before-draw',
@@ -102,14 +143,10 @@ function getBrowserLaunchOptions(env) {
     );
   }
 
-  // Add viewport and other options
-  launchOptions.viewport = { width: 1366, height: 768 };
-  launchOptions.userAgent = userAgent;
-
   return launchOptions;
 }
 
-// Enhanced context options to better mimic real browser
+// Enhanced context options
 function getContextOptions() {
   return {
     viewport: { width: 1366, height: 768 },
@@ -120,10 +157,7 @@ function getContextOptions() {
     permissions: ['notifications'],
     locale: 'en-US',
     timezoneId: 'America/New_York',
-    geolocation: { longitude: -74.006, latitude: 40.7128 }, // New York coordinates
     colorScheme: 'light',
-    reducedMotion: 'reduce',
-    forcedColors: 'none',
     extraHTTPHeaders: {
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
@@ -139,419 +173,95 @@ function getContextOptions() {
   };
 }
 
-// Initialize WhatsApp Web session with enhanced stealth
-async function initializeWhatsApp() {
-  try {
-    console.log('🚀 Initializing WhatsApp Web session...');
-
-    const env = detectEnvironment();
-    console.log(`🔧 Environment: ${env.isCloud ? 'Cloud' : 'Local'}`);
-
-    // Force browser installation in cloud environments
-    if (env.isCloud) {
-      try {
-        console.log('🔍 Installing Playwright browsers...');
-        const { execSync } = require('child_process');
-
-        const installCommands = [
-          'npx playwright install chromium --with-deps',
-          'npx playwright install-deps chromium',
-          'npx playwright install chromium'
-        ];
-
-        let installSuccess = false;
-        for (const command of installCommands) {
-          try {
-            console.log(`🔄 Trying: ${command}`);
-            execSync(command, {
-              stdio: 'inherit',
-              timeout: 300000 // 5 minutes timeout
-            });
-            console.log(`✅ Success with: ${command}`);
-            installSuccess = true;
-            break;
-          } catch (cmdError) {
-            console.log(`❌ Failed: ${command} - ${cmdError.message}`);
-            continue;
-          }
-        }
-
-        if (!installSuccess) {
-          console.log('⚠️ All installation methods failed, attempting to continue...');
-        }
-      } catch (installError) {
-        console.error('❌ Browser installation failed:', installError.message);
-      }
-    }
-
-    const launchOptions = getBrowserLaunchOptions(env);
-    console.log('🚀 Launching browser with options:', JSON.stringify(launchOptions, null, 2));
-    
-    globalBrowser = await chromium.launch(launchOptions);
-
-    const contextOptions = getContextOptions();
-    const context = await globalBrowser.newContext(contextOptions);
-
-    globalPage = await context.newPage();
-
-    // Enhanced stealth measures - this is crucial for avoiding detection
-    await globalPage.addInitScript(() => {
-      // Remove webdriver property
-      delete Object.getPrototypeOf(navigator).webdriver;
-      delete navigator.__proto__.webdriver;
-      delete navigator.webdriver;
-
-      // Override the plugins property to use a custom getter
-      Object.defineProperty(navigator, 'plugins', {
-        get: function() {
-          return [
-            {
-              0: {
-                type: "application/x-google-chrome-pdf",
-                suffixes: "pdf",
-                description: "Portable Document Format",
-                enabledPlugin: Plugin
-              },
-              description: "Portable Document Format",
-              filename: "internal-pdf-viewer",
-              length: 1,
-              name: "Chrome PDF Plugin"
-            },
-            {
-              0: {
-                type: "application/pdf",
-                suffixes: "pdf",
-                description: "",
-                enabledPlugin: Plugin
-              },
-              description: "",
-              filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai",
-              length: 1,
-              name: "Chrome PDF Viewer"
-            }
-          ];
-        }
-      });
-
-      // Override the languages property
-      Object.defineProperty(navigator, 'languages', {
-        get: function() {
-          return ['en-US', 'en'];
-        }
-      });
-
-      // Override the chrome property
-      Object.defineProperty(window, 'chrome', {
-        get: function() {
-          return {
-            runtime: {},
-            loadTimes: function() {},
-            csi: function() {},
-            app: {}
-          };
-        }
-      });
-
-      // Override the permissions property
-      const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters) => (
-        parameters.name === 'notifications' ?
-          Promise.resolve({ state: Notification.permission }) :
-          originalQuery(parameters)
-      );
-
-      // Add missing window.chrome
-      if (!window.chrome) {
-        window.chrome = {};
-      }
-
-      if (!window.chrome.runtime) {
-        window.chrome.runtime = {};
-      }
-
-      // Override screen properties
-      Object.defineProperty(screen, 'availHeight', { get: () => 738 });
-      Object.defineProperty(screen, 'availWidth', { get: () => 1366 });
-      Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
-      Object.defineProperty(screen, 'height', { get: () => 768 });
-      Object.defineProperty(screen, 'pixelDepth', { get: () => 24 });
-      Object.defineProperty(screen, 'width', { get: () => 1366 });
-
-      // Override Date to avoid timezone detection
-      const originalDate = Date;
-      function FakeDate(...args) {
-        if (args.length === 0) {
-          return new originalDate();
-        }
-        return new originalDate(...args);
-      }
-      FakeDate.prototype = originalDate.prototype;
-      FakeDate.now = originalDate.now;
-      FakeDate.parse = originalDate.parse;
-      FakeDate.UTC = originalDate.UTC;
-      window.Date = FakeDate;
-
-      // Override canvas fingerprinting
-      const getContext = HTMLCanvasElement.prototype.getContext;
-      HTMLCanvasElement.prototype.getContext = function(type) {
-        if (type === '2d') {
-          const context = getContext.call(this, type);
-          const originalFillText = context.fillText;
-          context.fillText = function(text, x, y, maxWidth) {
-            return originalFillText.call(this, text, x, y, maxWidth);
-          };
-          return context;
-        }
-        return getContext.call(this, type);
-      };
-    });
-
-    // Set additional headers to mimic real browser
-    await globalPage.setExtraHTTPHeaders({
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Cache-Control': 'no-cache',
-      'Pragma': 'no-cache',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none',
-      'Sec-Fetch-User': '?1',
-      'Upgrade-Insecure-Requests': '1'
-    });
-
-    console.log('🌐 Navigating to WhatsApp Web...');
-    
-    // Navigate with retry mechanism
-    let navigationSuccess = false;
-    const maxRetries = 3;
-    
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        console.log(`🔄 Navigation attempt ${attempt}/${maxRetries}`);
-        
-        await globalPage.goto('https://web.whatsapp.com/', {
-          waitUntil: 'domcontentloaded',
-          timeout: 60000
-        });
-
-        // Wait for page to stabilize
-        await globalPage.waitForTimeout(5000);
-
-        // Check if page loaded successfully
-        const title = await globalPage.title();
-        console.log(`📄 Page title: ${title}`);
-
-        if (title.toLowerCase().includes('whatsapp')) {
-          navigationSuccess = true;
-          break;
-        }
-      } catch (navError) {
-        console.log(`❌ Navigation attempt ${attempt} failed:`, navError.message);
-        if (attempt < maxRetries) {
-          await globalPage.waitForTimeout(5000);
-        }
-      }
-    }
-
-    if (!navigationSuccess) {
-      throw new Error('Failed to navigate to WhatsApp Web after multiple attempts');
-    }
-
-    // Enhanced wait strategy for cloud environments
-    const stabilizeTime = env.isCloud ? 20000 : 10000;
-    console.log(`⏳ Waiting ${stabilizeTime}ms for page to stabilize...`);
-    await globalPage.waitForTimeout(stabilizeTime);
-
-    // Removed initial screenshot for Render optimization
-
-    // Handle compatibility warnings
+// Check if browser is already logged in
+async function checkExistingLogin() {
+  if (!globalPage) return false;
   
-
-    // Check for any error messages
-    await checkForErrorMessages();
-
-    // Enhanced login detection
-    const loginResult = await checkLoginStatus();
-
-    if (loginResult.loggedIn) {
-      isLoggedIn = true;
-      console.log('✅ User is already logged in');
-      return { loggedIn: true };
-    }
-
-    // Enhanced QR code detection with multiple attempts
-    let qrResult = null;
-    const qrAttempts = 5;
+  try {
+    console.log('🔍 Checking existing login status...');
     
-    for (let attempt = 1; attempt <= qrAttempts; attempt++) {
-      console.log(`🔍 QR code extraction attempt ${attempt}/${qrAttempts}`);
-      
-      qrResult = await extractQRCode();
-      
-      if (qrResult.success) {
-        break;
-      }
-      
-      if (attempt < qrAttempts) {
-        console.log('⏳ Waiting before next QR extraction attempt...');
-        await globalPage.waitForTimeout(5000);
-        
-        // Try refreshing the page
-        if (attempt === 3) {
-          console.log('🔄 Refreshing page for QR code...');
-          await globalPage.reload({ waitUntil: 'domcontentloaded' });
-          await globalPage.waitForTimeout(10000);
-        }
-      }
-    }
-
-    if (!qrResult || !qrResult.success) {
-      throw new Error(qrResult?.error || 'Failed to extract QR code after multiple attempts');
-    }
-
-    console.log('✅ QR code extracted successfully');
-
-    // Start monitoring for QR scan completion
-    monitorQRScanCompletion();
-
-    return {
-      loggedIn: false,
-      qrCode: qrResult.qrCode,
-      metadata: qrResult.metadata
-    };
-
-  } catch (error) {
-    console.error('❌ Failed to initialize WhatsApp:', error.message);
-    await cleanup();
-    throw error;
-  }
-}
-
-// Check for error messages that might indicate detection
-async function checkForErrorMessages() {
-  try {
-    const errorMessages = await globalPage.evaluate(() => {
-      const text = document.body.innerText.toLowerCase();
-      const errors = [];
-      
-      if (text.includes("can't scan")) {
-        errors.push("Can't scan device detected");
-      }
-      if (text.includes("unsupported browser")) {
-        errors.push("Unsupported browser detected");
-      }
-      if (text.includes("not supported")) {
-        errors.push("Not supported message detected");
-      }
-      if (text.includes("update your browser")) {
-        errors.push("Update browser message detected");
-      }
-      
-      return errors;
-    });
-
-    if (errorMessages.length > 0) {
-      console.log('⚠️ Error messages detected:', errorMessages);
-      
-      // Removed error screenshot for Render optimization
-      
-      // Try to handle the error by refreshing
-      console.log('🔄 Attempting to handle error by refreshing...');
-      await globalPage.reload({ waitUntil: 'domcontentloaded' });
-      await globalPage.waitForTimeout(10000);
-    }
-  } catch (error) {
-    console.log('⚠️ Error checking for error messages:', error.message);
-  }
-}
-
-
-// Enhanced login status check
-async function checkLoginStatus() {
-  try {
-    console.log('🔍 Checking login status...');
-
-    const env = detectEnvironment();
-    const timeout = env.isCloud ? 30000 : 15000;
-
-    // Check for loading states first
-    const loadingSelectors = [
-      'div:has-text("Loading chats")',
-      'div:has-text("Loading...")',
-      '[data-testid="startup-progress"]',
-      '.progress-container',
-      '.loading-screen'
-    ];
-
-    for (const selector of loadingSelectors) {
-      try {
-        const loadingElement = await globalPage.$(selector);
-        if (loadingElement && await loadingElement.isVisible()) {
-          console.log(`⏳ Found loading state: ${selector}`);
-          await globalPage.waitForTimeout(15000);
-          break;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-
     const loginSelectors = [
       '[data-testid="chat-list"]',
-      '[data-testid="chat-list-search"]',
-      'div[contenteditable="true"][data-tab="3"]',
-      '[title="Search or start new chat"]',
-      'div[role="textbox"][data-tab="3"]',
       '[data-testid="side"]',
-      '#side'
+      '#side',
+      '[data-testid="chat-list-search"]',
+      'div[role="textbox"][data-tab="3"]'
     ];
 
     for (const selector of loginSelectors) {
       try {
-        const element = await globalPage.waitForSelector(selector, {
-          timeout: 5000,
-          state: 'visible'
-        });
-
+        const element = await globalPage.$(selector);
         if (element && await element.isVisible()) {
-          console.log(`✅ Login detected with: ${selector}`);
-          return { loggedIn: true };
+          console.log(`✅ Already logged in - found: ${selector}`);
+          isLoggedIn = true;
+          isWhatsAppReady = true;
+          return true;
         }
       } catch (e) {
         continue;
       }
     }
-
-    return { loggedIn: false };
+    
+    return false;
   } catch (error) {
-    console.log('⚠️ Error checking login status:', error.message);
-    return { loggedIn: false };
+    console.log('⚠️ Error checking existing login:', error.message);
+    return false;
   }
 }
 
-// Enhanced QR code extraction with better error handling
+// Enhanced stealth setup
+async function setupStealth(page) {
+  await page.addInitScript(() => {
+    // Remove webdriver property
+    delete Object.getPrototypeOf(navigator).webdriver;
+    delete navigator.__proto__.webdriver;
+    delete navigator.webdriver;
+
+    // Override plugins
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [
+        {
+          0: { type: "application/x-google-chrome-pdf", suffixes: "pdf", description: "Portable Document Format" },
+          description: "Portable Document Format",
+          filename: "internal-pdf-viewer",
+          length: 1,
+          name: "Chrome PDF Plugin"
+        }
+      ]
+    });
+
+    // Override languages
+    Object.defineProperty(navigator, 'languages', {
+      get: () => ['en-US', 'en']
+    });
+
+    // Add chrome object
+    if (!window.chrome) {
+      window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
+    }
+
+    // Override permissions
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) => (
+      parameters.name === 'notifications' ?
+        Promise.resolve({ state: Notification.permission }) :
+        originalQuery(parameters)
+    );
+  });
+}
+
+// Optimized QR code extraction
 async function extractQRCode() {
   try {
     console.log('🔍 Extracting QR code...');
 
-    // Wait for QR code to fully load
-    const env = detectEnvironment();
-    const waitTime = env.isCloud ? 15000 : 8000;
-    await globalPage.waitForTimeout(waitTime);
-
-    // Take screenshot before QR extraction for debugging
-    await globalPage.screenshot({
-      path: `before-qr-extraction-${Date.now()}.png`,
-      fullPage: true
-    });
+    // Wait for QR code container
+    await globalPage.waitForTimeout(5000);
 
     const qrSelectors = [
       'canvas[aria-label*="QR"]',
       'canvas[aria-label*="Scan"]',
       '[data-testid="qr-code"] canvas',
-      '[data-testid="qr-canvas"]',
-      '.qr-wrapper canvas',
-      '.landing-wrapper canvas',
       'canvas[role="img"]',
       'canvas'
     ];
@@ -559,130 +269,102 @@ async function extractQRCode() {
     let qrElement = null;
     let usedSelector = '';
 
-    // Log all canvas elements for debugging
-    const allCanvases = await globalPage.$$('canvas');
-    console.log(`🔍 Found ${allCanvases.length} canvas elements on page`);
-
-    for (let i = 0; i < allCanvases.length; i++) {
-      const canvas = allCanvases[i];
-      try {
-        const box = await canvas.boundingBox();
-        const isVisible = await canvas.isVisible();
-        console.log(`Canvas ${i}: visible=${isVisible}, box=${JSON.stringify(box)}`);
-      } catch (e) {
-        console.log(`Canvas ${i}: error getting info - ${e.message}`);
-      }
-    }
-
     for (const selector of qrSelectors) {
       try {
         const elements = await globalPage.$$(selector);
-        console.log(`🔍 Selector "${selector}" found ${elements.length} elements`);
-
+        
         for (const element of elements) {
-          if (!await element.isVisible()) {
-            console.log(`Element not visible for selector: ${selector}`);
-            continue;
-          }
+          if (!await element.isVisible()) continue;
 
           const box = await element.boundingBox();
-          if (!box || box.width < 50 || box.height < 50) {
-            console.log(`Element too small for selector: ${selector}, box:`, box);
-            continue;
-          }
+          if (!box || box.width < 100 || box.height < 100) continue;
 
-          // Validate canvas has content
-          const hasContent = await element.evaluate(canvas => {
-            if (canvas.tagName.toLowerCase() !== 'canvas') return true;
-
+          // Validate canvas has QR content
+          const hasQRContent = await element.evaluate(canvas => {
+            if (canvas.tagName.toLowerCase() !== 'canvas') return false;
+            
             try {
               const ctx = canvas.getContext('2d');
-              const imageData = ctx.getImageData(0, 0, Math.min(50, canvas.width), Math.min(50, canvas.height));
-              const hasPixels = imageData.data.some((pixel, index) => index % 4 !== 3 && pixel > 30);
-              return hasPixels;
+              const imageData = ctx.getImageData(0, 0, Math.min(100, canvas.width), Math.min(100, canvas.height));
+              // Check for QR-like pattern (black and white pixels)
+              let blackPixels = 0, whitePixels = 0;
+              
+              for (let i = 0; i < imageData.data.length; i += 4) {
+                const r = imageData.data[i];
+                const g = imageData.data[i + 1];
+                const b = imageData.data[i + 2];
+                const brightness = (r + g + b) / 3;
+                
+                if (brightness < 128) blackPixels++;
+                else whitePixels++;
+              }
+              
+              // QR codes should have both black and white pixels
+              return blackPixels > 100 && whitePixels > 100;
             } catch (e) {
-              console.log('Error checking canvas content:', e.message);
               return false;
             }
           });
 
-          console.log(`Canvas content check for ${selector}: ${hasContent}`);
-
-          if (hasContent) {
+          if (hasQRContent) {
             qrElement = element;
             usedSelector = selector;
-            console.log(`✅ Found valid QR canvas with selector: ${selector}`);
+            console.log(`✅ Found valid QR canvas: ${selector}`);
             break;
           }
         }
 
         if (qrElement) break;
-
       } catch (e) {
-        console.log(`Error with selector ${selector}:`, e.message);
         continue;
       }
     }
 
     if (!qrElement) {
-      // Debug screenshot
-      await globalPage.screenshot({
-        path: `debug-no-qr-${Date.now()}.png`,
-        fullPage: true
-      });
-
-      // Try to get page content for debugging
-      const pageText = await globalPage.evaluate(() => document.body.innerText);
-      console.log('📄 Page text preview:', pageText.substring(0, 500));
-
-      return {
-        success: false,
-        error: 'QR code element not found',
-        debug: `Check debug-no-qr-${Date.now()}.png`
-      };
+      return { success: false, error: 'QR code element not found' };
     }
 
-    // Extract QR code
+    // Extract QR code with retry
     let qrDataUrl;
-    const tagName = await qrElement.evaluate(el => el.tagName.toLowerCase());
-
-    if (tagName === 'canvas') {
-      // Wait for canvas to be fully rendered
-      await globalPage.waitForTimeout(3000);
-
-      qrDataUrl = await qrElement.evaluate(canvas => {
-        try {
+    const maxRetries = 3;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await globalPage.waitForTimeout(2000);
+        
+        qrDataUrl = await qrElement.evaluate(canvas => {
           return canvas.toDataURL('image/png');
-        } catch (e) {
-          console.log('Error converting canvas to data URL:', e.message);
-          return null;
+        });
+
+        if (qrDataUrl && qrDataUrl.length > 1000) {
+          break;
         }
-      });
+        
+        console.log(`⚠️ QR extraction attempt ${attempt} - data too small, retrying...`);
+      } catch (e) {
+        console.log(`❌ QR extraction attempt ${attempt} failed:`, e.message);
+      }
     }
 
     // Fallback to screenshot
     if (!qrDataUrl || qrDataUrl.length < 1000) {
-      console.log('🔄 Using screenshot fallback for QR code');
+      console.log('🔄 Using screenshot fallback');
       const screenshot = await qrElement.screenshot({ type: 'png' });
       qrDataUrl = `data:image/png;base64,${screenshot.toString('base64')}`;
     }
 
-    // Validate QR code data
     if (!qrDataUrl || qrDataUrl.length < 1000) {
-      return {
-        success: false,
-        error: 'QR code data too small or invalid'
-      };
+      return { success: false, error: 'Failed to extract valid QR code' };
     }
 
-    console.log(`✅ QR code extracted successfully, size: ${qrDataUrl.length} characters`);
+    console.log(`✅ QR code extracted successfully (${qrDataUrl.length} chars)`);
+    lastQRRefresh = Date.now();
 
     return {
       success: true,
       qrCode: qrDataUrl,
       metadata: {
         selector: usedSelector,
-        elementType: tagName,
         timestamp: new Date().toISOString(),
         dataSize: qrDataUrl.length
       }
@@ -690,224 +372,56 @@ async function extractQRCode() {
 
   } catch (error) {
     console.error('❌ QR extraction failed:', error.message);
-    
-    // Take error screenshot
-    try {
-      await globalPage.screenshot({
-        path: `qr-extraction-error-${Date.now()}.png`,
-        fullPage: true
-      });
-    } catch (e) {
-      console.log('Could not take error screenshot');
-    }
-
-    return {
-      success: false,
-      error: error.message
-    };
+    return { success: false, error: error.message };
   }
 }
 
-// Monitor QR scan completion
-async function monitorQRScanCompletion() {
+// Auto-refresh QR code if needed
+async function refreshQRIfNeeded() {
   try {
-    console.log('🔍 Starting QR scan monitoring...');
-
-    const env = detectEnvironment();
-    const maxWaitTime = env.isCloud ? 300000 : 180000;
-    const startTime = Date.now();
-
-    const checkInterval = setInterval(async () => {
-      try {
-        if (!globalPage) {
-          clearInterval(checkInterval);
-          return;
-        }
-
-        const loginResult = await checkLoginStatus();
-
-        if (loginResult.loggedIn) {
-          console.log('✅ QR scan completed! User is now logged in');
-          isLoggedIn = true;
-          isWhatsAppReady = true; // Set ready flag when login detected
-          clearInterval(checkInterval);
-
-          const timestamp = Date.now();
-          await globalPage.screenshot({
-            path: `qr-scan-success-${timestamp}.png`,
-            fullPage: true
-          });
-
-          return;
-        }
-
-        if ((Date.now() - startTime) > maxWaitTime) {
-          console.log('⏰ QR scan monitoring timeout reached');
-          clearInterval(checkInterval);
-
-          const timestamp = Date.now();
-          await globalPage.screenshot({
-            path: `qr-scan-timeout-${timestamp}.png`,
-            fullPage: true
-          });
-          return;
-        }
-
-      } catch (error) {
-        console.log('⚠️ Error during QR monitoring:', error.message);
-      }
-    }, 15000); // Check every 15 seconds
-
-  } catch (error) {
-    console.error('❌ QR scan monitoring failed:', error.message);
-  }
-}
-
-// Rest of the functions remain the same...
-async function waitForWhatsAppReady() {
-  try {
-    console.log('⏳ Waiting for WhatsApp to be fully loaded...');
-
-    const env = detectEnvironment();
-    const maxWaitTime = env.isCloud ? 60000 : 30000;
-    const startTime = Date.now();
-
-    const readySelectors = [
-      '[data-testid="chat-list"]',
-      '[data-testid="side"]',
-      'div[id="side"]',
-      '[data-testid="chat-list-search"]',
-      'div[role="textbox"][data-tab="3"]'
-    ];
-
-    while ((Date.now() - startTime) < maxWaitTime) {
-      await handleDialogs();
-
-      for (const selector of readySelectors) {
-        try {
-          const element = await globalPage.$(selector);
-          if (element && await element.isVisible()) {
-            console.log(`✅ WhatsApp ready - found: ${selector}`);
-            await globalPage.waitForTimeout(5000);
-            isWhatsAppReady = true;
-            return true;
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-
-      console.log('⏳ Still waiting for WhatsApp interface...');
+    const now = Date.now();
+    if (now - lastQRRefresh > QR_REFRESH_INTERVAL) {
+      console.log('🔄 QR code refresh needed...');
+      await globalPage.reload({ waitUntil: 'domcontentloaded' });
       await globalPage.waitForTimeout(5000);
+      lastQRRefresh = now;
+      return true;
     }
-
-    throw new Error(`WhatsApp interface not ready after ${maxWaitTime}ms`);
-
+    return false;
   } catch (error) {
-    console.error('❌ Error waiting for WhatsApp to be ready:', error.message);
-    throw error;
+    console.log('⚠️ Error refreshing QR:', error.message);
+    return false;
   }
 }
 
-async function navigateToChat(mobile) {
-  try {
-    console.log(`📞 Navigating to chat: ${mobile}`);
+// Enhanced login monitoring
+function startLoginMonitoring() {
+  if (loginCheckInterval) {
+    clearInterval(loginCheckInterval);
+  }
 
-    if (!isWhatsAppReady) {
-      console.log('⏳ WhatsApp not ready yet, waiting...');
-      await waitForWhatsAppReady();
-    }
-
-    await handleDialogs();
-
-    const cleanNumber = mobile.replace(/[^\d]/g, '');
-    const waUrl = `https://web.whatsapp.com/send?phone=${cleanNumber}`;
-    
-    console.log(`🌐 Navigating to: ${waUrl}`);
-    
-    await globalPage.goto(waUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000
-    });
-
-    await globalPage.waitForTimeout(5000);
-    await handleDialogs();
-
-    const chatSelectors = [
-      '[data-testid="conversation-compose-box-input"]',
-      'div[contenteditable="true"][data-tab="10"]',
-      '[role="textbox"][data-tab="10"]',
-      'div[contenteditable="true"][data-lexical-editor="true"]',
-      'div[data-testid="compose-input"]',
-      'footer[data-testid="compose"]',
-      '[data-testid="compose-box-input"]'
-    ];
-
-    let chatFound = false;
-    let workingSelector = null;
-    
-    for (const selector of chatSelectors) {
-      try {
-        await globalPage.waitForSelector(selector, {
-          timeout: 20000,
-          state: 'visible'
-        });
-        
-        const element = await globalPage.$(selector);
-        if (element) {
-          const isVisible = await element.isVisible();
-          const isEnabled = await element.isEnabled();
-          
-          if (isVisible && isEnabled) {
-            chatFound = true;
-            workingSelector = selector;
-            console.log(`✅ Chat interface loaded with selector: ${selector}`);
-            break;
-          }
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-
-    if (!chatFound) {
-      await globalPage.screenshot({
-        path: `debug-chat-not-found-${cleanNumber}-${Date.now()}.png`,
-        fullPage: true
-      });
-      throw new Error('Chat interface not found after navigation');
-    }
-
-    await globalPage.waitForTimeout(3000);
-
-    if (workingSelector) {
-      try {
-        await globalPage.click(workingSelector);
-        console.log('🎯 Chat input focused and ready');
-      } catch (e) {
-        console.log('⚠️ Could not focus chat input, but proceeding...');
-      }
-    }
-
-    console.log(`✅ Successfully navigated to chat: ${mobile}`);
-    return true;
-
-  } catch (error) {
-    console.error(`❌ Failed to navigate to chat ${mobile}:`, error.message);
-
+  loginCheckInterval = setInterval(async () => {
     try {
-      await globalPage.screenshot({
-        path: `debug-nav-fail-${mobile.replace(/[^\d]/g, '')}-${Date.now()}.png`,
-        fullPage: true,
-      });
-    } catch (e) {
-      console.log('Could not take debug screenshot');
-    }
+      if (!globalPage || isLoggedIn) {
+        clearInterval(loginCheckInterval);
+        return;
+      }
 
-    throw error;
-  }
+      const loginStatus = await checkExistingLogin();
+      
+      if (loginStatus) {
+        console.log('✅ Login detected via monitoring');
+        isLoggedIn = true;
+        isWhatsAppReady = true;
+        clearInterval(loginCheckInterval);
+      }
+    } catch (error) {
+      console.log('⚠️ Error in login monitoring:', error.message);
+    }
+  }, 10000); // Check every 10 seconds
 }
 
+// Handle WhatsApp dialogs and popups
 async function handleDialogs() {
   try {
     const dialogSelectors = [
@@ -917,40 +431,167 @@ async function handleDialogs() {
       'button:has-text("Got it")',
       'button:has-text("Dismiss")',
       '[data-testid="popup-panel-ok-button"]',
-      '[role="button"]:has-text("OK")',
-      'button[aria-label="Close"]',
-      'div[data-testid="modal"] button'
+      'button[aria-label="Close"]'
     ];
 
     for (const selector of dialogSelectors) {
       try {
-        const button = await globalPage.$(selector);
-        if (button && await button.isVisible()) {
-          console.log(`📋 Handling dialog: ${selector}`);
-          await button.click();
-          await globalPage.waitForTimeout(2000);
-          break;
+        const element = await globalPage.$(selector);
+        if (element && await element.isVisible()) {
+          console.log(`📋 Dismissing dialog: ${selector}`);
+          await element.click();
+          await globalPage.waitForTimeout(1000);
+          return true;
         }
       } catch (e) {
         continue;
       }
     }
+    return false;
   } catch (error) {
     console.log('⚠️ Error handling dialogs:', error.message);
+    return false;
   }
 }
 
-async function sendCombinedMessage(mobile, message = '', mediaUrl = '', caption = '') {
+// Main initialization function
+async function initializeWhatsApp() {
   try {
-    console.log(`📤 Sending combined message to ${mobile}:`, {
-      hasMessage: !!message,
-      hasMedia: !!mediaUrl,
-      hasCaption: !!caption
+    console.log('🚀 Initializing WhatsApp Web session...');
+
+    // Check if already initialized and logged in
+    if (globalBrowser && globalPage && isLoggedIn) {
+      console.log('✅ WhatsApp session already active and logged in');
+      return { loggedIn: true, alreadyInitialized: true };
+    }
+
+    const env = detectEnvironment();
+    console.log(`🔧 Environment: ${env.isCloud ? 'Cloud' : 'Local'}`);
+
+    // Check and install Playwright if needed
+    if (env.isCloud) {
+      await checkPlaywrightInstallation();
+      if (!playwrightInstalled) {
+        await installPlaywright();
+      }
+    }
+
+    // Launch browser if not already launched
+    if (!globalBrowser) {
+      const launchOptions = getBrowserLaunchOptions(env);
+      console.log('🚀 Launching browser...');
+      
+      globalBrowser = await chromium.launch(launchOptions);
+      globalContext = await globalBrowser.newContext(getContextOptions());
+      globalPage = await globalContext.newPage();
+      
+      await setupStealth(globalPage);
+    }
+
+    // Check if already on WhatsApp and logged in
+    const currentUrl = await globalPage.url();
+    if (currentUrl.includes('web.whatsapp.com')) {
+      const loginStatus = await checkExistingLogin();
+      if (loginStatus) {
+        return { loggedIn: true, alreadyInitialized: true };
+      }
+    }
+
+    // Navigate to WhatsApp Web
+    console.log('🌐 Navigating to WhatsApp Web...');
+    await globalPage.goto('https://web.whatsapp.com/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000
     });
 
-    await navigateToChat(mobile);
+    // Wait for page to stabilize
+    await globalPage.waitForTimeout(8000);
     await handleDialogs();
 
+    // Check if already logged in after navigation
+    const loginStatus = await checkExistingLogin();
+    if (loginStatus) {
+      return { loggedIn: true };
+    }
+
+    // Extract QR code
+    const qrResult = await extractQRCode();
+    
+    if (!qrResult.success) {
+      throw new Error(qrResult.error || 'Failed to extract QR code');
+    }
+
+    // Start monitoring for login
+    startLoginMonitoring();
+
+    console.log('✅ WhatsApp initialization completed');
+
+    return {
+      loggedIn: false,
+      qrCode: qrResult.qrCode,
+      metadata: qrResult.metadata
+    };
+
+  } catch (error) {
+    console.error('❌ WhatsApp initialization failed:', error.message);
+    await cleanup();
+    throw error;
+  }
+}
+
+// Get fresh QR code
+async function getFreshQRCode() {
+  try {
+    if (!globalPage) {
+      throw new Error('WhatsApp not initialized');
+    }
+
+    if (isLoggedIn) {
+      return { success: true, loggedIn: true };
+    }
+
+    // Refresh QR if needed
+    await refreshQRIfNeeded();
+    
+    const qrResult = await extractQRCode();
+    
+    if (qrResult.success) {
+      return {
+        success: true,
+        qrCode: qrResult.qrCode,
+        metadata: qrResult.metadata,
+        loggedIn: false
+      };
+    }
+
+    return qrResult;
+  } catch (error) {
+    console.error('❌ Error getting fresh QR code:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+// Send message function (optimized)
+async function sendMessage(mobile, message) {
+  try {
+    if (!isLoggedIn || !isWhatsAppReady) {
+      throw new Error('WhatsApp not logged in or ready');
+    }
+
+    console.log(`📤 Sending message to ${mobile}`);
+
+    const cleanNumber = mobile.replace(/[^\d]/g, '');
+    const waUrl = `https://web.whatsapp.com/send?phone=${cleanNumber}`;
+    
+    await globalPage.goto(waUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
+    });
+
+    await globalPage.waitForTimeout(3000);
+    await handleDialogs();
+
+    // Find message input
     const messageSelectors = [
       '[data-testid="conversation-compose-box-input"]',
       'div[contenteditable="true"][data-tab="10"]',
@@ -961,125 +602,53 @@ async function sendCombinedMessage(mobile, message = '', mediaUrl = '', caption 
     let messageBox = null;
     for (const selector of messageSelectors) {
       try {
-        messageBox = await globalPage.$(selector);
-        if (messageBox && await messageBox.isVisible()) {
-          console.log(`✅ Found message box: ${selector}`);
-          break;
-        }
+        messageBox = await globalPage.waitForSelector(selector, {
+          timeout: 15000,
+          state: 'visible'
+        });
+        if (messageBox) break;
       } catch (e) {
         continue;
       }
     }
 
     if (!messageBox) {
-      throw new Error('Message input box not found');
+      throw new Error('Message input not found');
     }
 
+    // Type and send message
     await messageBox.click();
     await globalPage.waitForTimeout(500);
-    await messageBox.selectText();
-    await globalPage.keyboard.press('Delete');
-    await globalPage.waitForTimeout(500);
-
-    let combinedContent = '';
-
-    if (mediaUrl) {
-      combinedContent += mediaUrl;
-    }
-
-    if (caption) {
-      combinedContent += combinedContent ? `\n${caption}` : caption;
-    }
-
-    if (message) {
-      combinedContent += combinedContent ? `\n${message}` : message;
-    }
-
-    if (!combinedContent) {
-      throw new Error('No content to send');
-    }
-
-    console.log(`📝 Combined content to send:\n${combinedContent}`);
-
-    // Type the combined content using multiple methods for reliability
-    let typingSuccess = false;
-
-    // Method 1: Direct typing with shorter timeout
-    try {
-      await messageBox.type(combinedContent, { delay: 30, timeout: 15000 });
-      typingSuccess = true;
-      console.log('✅ Direct typing successful');
-    } catch (typeError) {
-      console.log('⚠️ Direct typing failed, trying alternative method...');
-
-      // Method 2: Focus and use keyboard
-      try {
-        await messageBox.focus();
-        await globalPage.keyboard.type(combinedContent, { delay: 30 });
-        typingSuccess = true;
-        console.log('✅ Keyboard typing successful');
-      } catch (keyboardError) {
-        console.log('⚠️ Keyboard typing failed, trying clipboard method...');
-
-        // Method 3: Use clipboard
-        try {
-          await globalPage.evaluate((text) => {
-            navigator.clipboard.writeText(text);
-          }, combinedContent);
-
-          await messageBox.focus();
-          await globalPage.keyboard.press('Control+V');
-          typingSuccess = true;
-          console.log('✅ Clipboard typing successful');
-        } catch (clipboardError) {
-          console.log('❌ All typing methods failed');
-        }
-      }
-    }
-
-    if (!typingSuccess) {
-      throw new Error('Failed to type message content');
-    }
-
+    await messageBox.type(message, { delay: 50 });
+    await globalPage.waitForTimeout(1000);
+    await globalPage.keyboard.press('Enter');
     await globalPage.waitForTimeout(2000);
 
-    // Send the message
-    await globalPage.keyboard.press('Enter');
-    await globalPage.waitForTimeout(3000);
-
-    console.log(`✅ Combined message sent to ${mobile}`);
-    return {
-      success: true,
-      mobile,
-      message: 'Combined message sent successfully',
-      content: { mediaUrl, caption, message }
-    };
+    console.log(`✅ Message sent to ${mobile}`);
+    return { success: true, mobile, message: 'Message sent successfully' };
 
   } catch (error) {
-    console.error(`❌ Failed to send combined message to ${mobile}:`, error.message);
-
-    try {
-      await globalPage.screenshot({
-        path: `debug-combined-send-fail-${Date.now()}.png`,
-        fullPage: true
-      });
-    } catch (e) {
-      console.log('Could not take debug screenshot');
-    }
-
+    console.error(`❌ Failed to send message to ${mobile}:`, error.message);
     return { success: false, mobile, error: error.message };
   }
 }
 
+// Cleanup function
 async function cleanup() {
   try {
+    if (loginCheckInterval) {
+      clearInterval(loginCheckInterval);
+      loginCheckInterval = null;
+    }
+    
     if (globalBrowser) {
       await globalBrowser.close();
       globalBrowser = null;
       globalPage = null;
+      globalContext = null;
       isLoggedIn = false;
       isWhatsAppReady = false;
-      console.log('🧹 Browser cleaned up');
+      console.log('🧹 Browser cleanup completed');
     }
   } catch (error) {
     console.log('⚠️ Error during cleanup:', error.message);
@@ -1087,20 +656,17 @@ async function cleanup() {
 }
 
 // API Routes
+
+// Initialize WhatsApp
 app.post('/initialize', async (req, res) => {
   try {
-    if (isLoggedIn && globalBrowser) {
-      return res.json({
-        success: true,
-        message: 'WhatsApp session already active'
-      });
-    }
-
     const result = await initializeWhatsApp();
-
+    
     res.json({
       success: true,
-      message: 'WhatsApp session initialized successfully',
+      message: result.alreadyInitialized ? 
+        'WhatsApp session already active' : 
+        'WhatsApp session initialized',
       qrCode: result.qrCode || null,
       loggedIn: result.loggedIn || false,
       metadata: result.metadata || null
@@ -1113,7 +679,6 @@ app.post('/initialize', async (req, res) => {
     });
   }
 });
-
 app.post('/send-messages', async (req, res) => {
   try {
     const { whatsapp } = req.body;
