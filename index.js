@@ -1302,7 +1302,12 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-// Start server
+app.use(express.static(path.join(__dirname, 'build')));
+
+app.get('', (req, res) => {
+  res.sendFile(path.join(__dirname, 'build', 'index.html'));
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Enhanced WhatsApp API Server running on port ${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/health`);
